@@ -914,6 +914,18 @@ export const storageService = {
     const existing = storageService.getUserById(updatedUser.id);
     if (!existing) return { success: false, error: 'User not found' };
 
+    // Validate username uniqueness if changed
+    const cleanUsername = updatedUser.username.trim().toLowerCase();
+    if (!cleanUsername) {
+      return { success: false, error: 'Chambers username cannot be empty.' };
+    }
+    if (cleanUsername !== existing.username.toLowerCase()) {
+      const duplicate = storageService.getUsers().find(u => u.id !== updatedUser.id && u.username.toLowerCase() === cleanUsername);
+      if (duplicate) {
+        return { success: false, error: `Username "${cleanUsername}" is already assigned to another Chambers user account.` };
+      }
+    }
+
     // PRINCIPAL PARTNER PROTECTION:
     // If the existing user is the Principal Partner:
     // Only the Principal Partner can update their own account, and they cannot demote themselves or disable their own account.
@@ -931,9 +943,14 @@ export const storageService = {
       return { success: false, error: 'Unauthorized: Only the Principal Partner can assign the Principal Partner role.' };
     }
 
-    const users = storageService.getUsers().map(u => u.id === updatedUser.id ? updatedUser : u);
+    const sanitizedUser: User = {
+      ...updatedUser,
+      username: cleanUsername
+    };
+
+    const users = storageService.getUsers().map(u => u.id === updatedUser.id ? sanitizedUser : u);
     setToStorage(STORAGE_KEYS.USERS, users);
-    logAudit(actor, 'UPDATE_USER_ACCOUNT', 'User', updatedUser.id, `${actor.name} updated account details for ${updatedUser.name} (${updatedUser.username})`);
+    logAudit(actor, 'UPDATE_USER_ACCOUNT', 'User', updatedUser.id, `${actor.name} updated account details for ${sanitizedUser.name} (${sanitizedUser.username})`);
     return { success: true };
   },
 
@@ -1008,6 +1025,23 @@ export const storageService = {
     const branches = storageService.getBranches().map(b => b.id === branch.id ? branch : b);
     setToStorage(STORAGE_KEYS.BRANCHES, branches);
     logAudit(actor, 'UPDATE_BRANCH', 'Branch', branch.id, `Updated branch: ${branch.name}`);
+  },
+  deleteBranch: (branchId: string, actor: User): { success: boolean; error?: string } => {
+    if (actor.role !== 'PRINCIPAL_PARTNER') {
+      return { success: false, error: 'Unauthorized: Only the Principal Partner can delete a Chambers branch.' };
+    }
+    const branches = storageService.getBranches();
+    if (branches.length <= 1) {
+      return { success: false, error: 'System constraint: At least one Chambers branch must remain active.' };
+    }
+    const target = branches.find(b => b.id === branchId);
+    if (!target) {
+      return { success: false, error: 'Branch record not found.' };
+    }
+    const remaining = branches.filter(b => b.id !== branchId);
+    setToStorage(STORAGE_KEYS.BRANCHES, remaining);
+    logAudit(actor, 'DELETE_BRANCH', 'Branch', branchId, `Principal Partner deleted branch: ${target.name} (${target.code})`);
+    return { success: true };
   },
 
   // Courts
@@ -1148,11 +1182,46 @@ export const storageService = {
       ...invoiceData,
       id: `inv-${Date.now()}`,
       invoiceNumber,
-      paymentReference: paymentRef
+      paymentReference: paymentRef,
+      branchId: invoiceData.branchId || actor.branchId || 'br-abuja-01',
+      approvalStatus: 'NONE'
     };
     setToStorage(STORAGE_KEYS.INVOICES, [newInvoice, ...invoices]);
     logAudit(actor, 'CREATE_INVOICE', 'Invoice', newInvoice.id, `Generated invoice ${invoiceNumber} for ${newInvoice.clientName} (₦${newInvoice.totalAmount.toLocaleString()})`);
     return newInvoice;
+  },
+  submitInvoiceForApproval: (invoiceCode: string, reason: string, actor: User): { success: boolean; request?: ApprovalRequest; error?: string } => {
+    const invoices = storageService.getInvoices();
+    const invoice = invoices.find(i => i.invoiceNumber.trim().toUpperCase() === invoiceCode.trim().toUpperCase());
+    if (!invoice) {
+      return { success: false, error: `Invoice with code "${invoiceCode}" was not found in Chambers registry.` };
+    }
+
+    const req = storageService.requestApproval({
+      requestType: 'Invoice Billing Approval',
+      requesterId: actor.id,
+      requesterName: actor.name,
+      requesterRole: actor.role,
+      branchId: actor.branchId || invoice.branchId || 'br-abuja-01',
+      title: `Invoice Clearance: ${invoice.invoiceNumber} (₦${invoice.totalAmount.toLocaleString()})`,
+      description: `Client: ${invoice.clientName}. Justification: ${reason || 'Account Officer submitted fee note for executive clearance'}`,
+      referenceCode: invoice.invoiceNumber
+    }, actor);
+
+    const updatedInvoices = invoices.map(i => {
+      if (i.invoiceNumber.trim().toUpperCase() === invoiceCode.trim().toUpperCase()) {
+        return {
+          ...i,
+          approvalStatus: 'PENDING_APPROVAL' as const,
+          approvalRequestId: req.id,
+          approvalNotes: `Submitted by ${actor.name} (${actor.role}): ${reason}`
+        };
+      }
+      return i;
+    });
+    setToStorage(STORAGE_KEYS.INVOICES, updatedInvoices);
+    logAudit(actor, 'SUBMIT_INVOICE_APPROVAL', 'Invoice', invoice.id, `${actor.name} submitted invoice ${invoice.invoiceNumber} for Principal Partner authorization`);
+    return { success: true, request: req };
   },
   submitPayment: (data: {
     paymentReference: string;
@@ -1164,12 +1233,15 @@ export const storageService = {
     notes?: string;
   }): PaymentRecord => {
     const payments = storageService.getPayments();
+    const invoicesList = storageService.getInvoices();
+    const matchingInvoice = invoicesList.find(i => i.invoiceNumber === data.invoiceNumber || i.paymentReference === data.paymentReference);
     const newPayment: PaymentRecord = {
       id: `pay-${Date.now()}`,
       paymentReference: data.paymentReference,
       invoiceNumber: data.invoiceNumber,
       clientName: data.clientName,
       amount: data.amount,
+      branchId: matchingInvoice?.branchId || 'br-abuja-01',
       paymentMethod: data.paymentMethod,
       paymentDate: new Date().toISOString(),
       status: 'PAYMENT_SUBMITTED',
@@ -1278,6 +1350,7 @@ export const storageService = {
     const newExpense: ExpenseRecord = {
       ...expense,
       id: `exp-${Date.now()}`,
+      branchId: expense.branchId || actor.branchId || 'br-abuja-01',
       recordedById: actor.id,
       recordedByName: actor.name
     };
@@ -1295,6 +1368,7 @@ export const storageService = {
       ...matterData,
       id: `mat-${Date.now()}`,
       matterId,
+      branchId: matterData.branchId || actor.branchId || 'br-abuja-01',
       createdAt: new Date().toISOString()
     };
     setToStorage(STORAGE_KEYS.MATTERS, [newMatter, ...matters]);
@@ -1313,10 +1387,12 @@ export const storageService = {
   addCase: (caseData: Omit<CaseRecord, 'id' | 'caseId' | 'createdAt'>, actor: User): CaseRecord => {
     const cases = storageService.getCases();
     const caseId = getNextNumber('case', 'CASE');
+    const matter = storageService.getMatters().find(m => m.id === caseData.matterId);
     const newCase: CaseRecord = {
       ...caseData,
       id: `case-${Date.now()}`,
       caseId,
+      branchId: caseData.branchId || (matter ? matter.branchId : actor.branchId) || 'br-abuja-01',
       createdAt: new Date().toISOString()
     };
     setToStorage(STORAGE_KEYS.CASES, [newCase, ...cases]);
@@ -1325,6 +1401,7 @@ export const storageService = {
     storageService.createCaseAssignment({
       caseId: newCase.id,
       suitNumber: newCase.suitNumber,
+      branchId: newCase.branchId,
       counselId: newCase.counselId,
       assignedById: actor.id,
       assignedByName: actor.name
@@ -1439,7 +1516,12 @@ export const storageService = {
   getCourtDiary: (): CourtDiaryEntry[] => getFromStorage<CourtDiaryEntry[]>(STORAGE_KEYS.COURT_DIARY, []),
   addCourtDiaryEntry: (entry: Omit<CourtDiaryEntry, 'id'>, actor: User): CourtDiaryEntry => {
     const entries = storageService.getCourtDiary();
-    const newEntry: CourtDiaryEntry = { ...entry, id: `diary-${Date.now()}` };
+    const caseItem = storageService.getCases().find(c => c.id === entry.caseId);
+    const newEntry: CourtDiaryEntry = {
+      ...entry,
+      id: `diary-${Date.now()}`,
+      branchId: entry.branchId || caseItem?.branchId || actor.branchId || 'br-abuja-01'
+    };
     setToStorage(STORAGE_KEYS.COURT_DIARY, [newEntry, ...entries]);
 
     const cases = storageService.getCases().map(c => {
@@ -1466,6 +1548,7 @@ export const storageService = {
     const newTask: Task = {
       ...task,
       id: `task-${Date.now()}`,
+      branchId: task.branchId || actor.branchId || 'br-abuja-01',
       createdAt: new Date().toISOString()
     };
     setToStorage(STORAGE_KEYS.TASKS, [newTask, ...tasks]);
@@ -1488,6 +1571,7 @@ export const storageService = {
       ...doc,
       id: `doc-${Date.now()}`,
       documentId: docCode,
+      branchId: doc.branchId || actor.branchId || 'br-abuja-01',
       uploadDate: new Date().toISOString(),
       uploadedById: actor.id,
       uploadedByName: actor.name
@@ -1545,7 +1629,8 @@ export const storageService = {
     const newProp: Property = {
       ...prop,
       id: `prop-${Date.now()}`,
-      propertyId
+      propertyId,
+      branchId: prop.branchId || actor.branchId || 'br-abuja-01'
     };
     setToStorage(STORAGE_KEYS.PROPERTIES, [newProp, ...props]);
     logAudit(actor, 'ADD_PROPERTY', 'Property', newProp.id, `Registered property: ${newProp.name} (${propertyId})`);
@@ -1807,6 +1892,21 @@ export const storageService = {
     setToStorage(STORAGE_KEYS.APPROVALS, list);
     const req = list.find(a => a.id === requestId);
     if (req) {
+      // Sync linked invoice approval status if this was an invoice approval request
+      if (req.requestType === 'Invoice Billing Approval' || req.referenceCode) {
+        const invList = storageService.getInvoices().map(inv => {
+          if (inv.invoiceNumber === req.referenceCode || inv.approvalRequestId === req.id) {
+            return {
+              ...inv,
+              approvalStatus: status,
+              approvalNotes: notes || `Principal Partner decision: ${status}`
+            };
+          }
+          return inv;
+        });
+        setToStorage(STORAGE_KEYS.INVOICES, invList);
+      }
+
       logAudit(actor, `APPROVAL_${status}`, 'ApprovalRequest', requestId, `Principal Partner decided: ${status}. Notes: ${notes}`);
       dispatchNotification(
         `Approval Decision: ${status}`,

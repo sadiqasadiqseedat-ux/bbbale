@@ -9,9 +9,12 @@ import {
   Plus, 
   Search, 
   CheckCircle2, 
-  AlertCircle,
-  FileText,
-  Scale
+  AlertCircle, 
+  FileText, 
+  Scale,
+  Edit3,
+  Trash2,
+  X
 } from 'lucide-react';
 import { storageService, subscribeToStore } from '../../services/storage';
 import { useAuth } from '../../context/AuthContext';
@@ -27,10 +30,26 @@ export const AdministrationView: React.FC = () => {
   const [audits, setAudits] = useState<AuditLog[]>([]);
   const [approvals, setApprovals] = useState<ApprovalRequest[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [branchActionError, setBranchActionError] = useState('');
+  const [branchActionSuccess, setBranchActionSuccess] = useState('');
 
   // New Branch Modal
   const [isAddBranchOpen, setIsAddBranchOpen] = useState(false);
   const [branchForm, setBranchForm] = useState({
+    name: '',
+    code: '',
+    address: '',
+    city: '',
+    state: '',
+    phone: '',
+    email: '',
+    isActive: true
+  });
+
+  // Edit Branch Modal
+  const [isEditBranchOpen, setIsEditBranchOpen] = useState(false);
+  const [selectedBranch, setSelectedBranch] = useState<Branch | null>(null);
+  const [editBranchForm, setEditBranchForm] = useState({
     name: '',
     code: '',
     address: '',
@@ -110,6 +129,60 @@ export const AdministrationView: React.FC = () => {
       content: '',
       status: 'Published'
     });
+  };
+
+  const handleOpenEditBranch = (b: Branch) => {
+    setSelectedBranch(b);
+    setEditBranchForm({
+      name: b.name,
+      code: b.code,
+      address: b.address,
+      city: b.city,
+      state: b.state,
+      phone: b.phone,
+      email: b.email,
+      isActive: b.isActive
+    });
+    setBranchActionError('');
+    setIsEditBranchOpen(true);
+  };
+
+  const handleSaveEditBranch = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedBranch || !currentUser) return;
+    setBranchActionError('');
+
+    storageService.updateBranch({
+      ...selectedBranch,
+      name: editBranchForm.name,
+      code: editBranchForm.code.toUpperCase(),
+      address: editBranchForm.address,
+      city: editBranchForm.city,
+      state: editBranchForm.state,
+      phone: editBranchForm.phone,
+      email: editBranchForm.email,
+      isActive: editBranchForm.isActive
+    }, currentUser);
+
+    setBranchActionSuccess(`Branch "${editBranchForm.name}" updated successfully.`);
+    setIsEditBranchOpen(false);
+    setSelectedBranch(null);
+    setTimeout(() => setBranchActionSuccess(''), 3000);
+  };
+
+  const handleDeleteBranch = (b: Branch) => {
+    if (!currentUser) return;
+    setBranchActionError('');
+
+    if (window.confirm(`Are you sure you want to permanently delete branch "${b.name}" (${b.code})? This executive action is reserved for the Principal Partner.`)) {
+      const res = storageService.deleteBranch(b.id, currentUser);
+      if (res.success) {
+        setBranchActionSuccess(`Branch "${b.name}" deleted.`);
+        setTimeout(() => setBranchActionSuccess(''), 3000);
+      } else {
+        setBranchActionError(res.error || 'Failed to delete branch.');
+      }
+    }
   };
 
   const handleDecideApproval = (reqId: string, status: 'APPROVED' | 'REJECTED') => {
@@ -207,39 +280,75 @@ export const AdministrationView: React.FC = () => {
 
       {/* Branches Table */}
       {activeTab === 'branches' && (
-        <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-100 text-slate-700 font-bold uppercase border-b border-slate-200">
-                <tr>
-                  <th className="p-3.5">Branch Code</th>
-                  <th className="p-3.5">Chambers Name</th>
-                  <th className="p-3.5">State & City</th>
-                  <th className="p-3.5">Physical Address</th>
-                  <th className="p-3.5">Phone & Official Email</th>
-                  <th className="p-3.5">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {branches.map(b => (
-                  <tr key={b.id} className="hover:bg-slate-50">
-                    <td className="p-3.5 font-mono font-bold text-amber-900">{b.code}</td>
-                    <td className="p-3.5 font-bold text-slate-900">{b.name}</td>
-                    <td className="p-3.5 text-slate-700">{b.state} ({b.city})</td>
-                    <td className="p-3.5 text-slate-600">{b.address}</td>
-                    <td className="p-3.5 text-slate-600">
-                      <p>{b.phone}</p>
-                      <p className="text-[10px] text-slate-400">{b.email}</p>
-                    </td>
-                    <td className="p-3.5">
-                      <span className="font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded">
-                        Active Branch
-                      </span>
-                    </td>
+        <div className="space-y-4">
+          {branchActionSuccess && (
+            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-800 text-xs flex items-center space-x-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>{branchActionSuccess}</span>
+            </div>
+          )}
+          {branchActionError && (
+            <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs flex items-center space-x-2">
+              <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+              <span>{branchActionError}</span>
+            </div>
+          )}
+
+          <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-100 text-slate-700 font-bold uppercase border-b border-slate-200">
+                  <tr>
+                    <th className="p-3.5">Branch Code</th>
+                    <th className="p-3.5">Chambers Name</th>
+                    <th className="p-3.5">State & City</th>
+                    <th className="p-3.5">Physical Address</th>
+                    <th className="p-3.5">Phone & Official Email</th>
+                    <th className="p-3.5">Status</th>
+                    {isPrincipalPartner && <th className="p-3.5 text-right">Actions (Principal Partner)</th>}
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {branches.map(b => (
+                    <tr key={b.id} className="hover:bg-slate-50">
+                      <td className="p-3.5 font-mono font-bold text-amber-900">{b.code}</td>
+                      <td className="p-3.5 font-bold text-slate-900">{b.name}</td>
+                      <td className="p-3.5 text-slate-700">{b.state} ({b.city})</td>
+                      <td className="p-3.5 text-slate-600">{b.address}</td>
+                      <td className="p-3.5 text-slate-600">
+                        <p>{b.phone}</p>
+                        <p className="text-[10px] text-slate-400">{b.email}</p>
+                      </td>
+                      <td className="p-3.5">
+                        <span className={`font-bold px-2 py-0.5 rounded ${b.isActive ? 'text-emerald-800 bg-emerald-50' : 'text-slate-600 bg-slate-100'}`}>
+                          {b.isActive ? 'Active Branch' : 'Inactive'}
+                        </span>
+                      </td>
+                      {isPrincipalPartner && (
+                        <td className="p-3.5 text-right space-x-1.5 whitespace-nowrap">
+                          <button
+                            onClick={() => handleOpenEditBranch(b)}
+                            className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-[11px] font-semibold transition-colors"
+                            title="Edit branch details"
+                          >
+                            <Edit3 className="w-3.5 h-3.5 inline mr-1" />
+                            <span>Edit</span>
+                          </button>
+                          <button
+                            onClick={() => handleDeleteBranch(b)}
+                            className="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 rounded text-[11px] font-semibold transition-colors"
+                            title="Delete this branch"
+                          >
+                            <Trash2 className="w-3.5 h-3.5 inline mr-1" />
+                            <span>Delete</span>
+                          </button>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}
@@ -551,6 +660,135 @@ export const AdministrationView: React.FC = () => {
                   className="px-5 py-2 bg-slate-900 text-amber-400 rounded font-bold"
                 >
                   Authorize & Provision Branch
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Branch Modal (Principal Partner Only) */}
+      {isEditBranchOpen && selectedBranch && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full p-6 space-y-4 border border-slate-300">
+            <div className="flex justify-between items-start border-b pb-2">
+              <div>
+                <h3 className="font-serif font-bold text-base text-slate-900">
+                  Edit Chambers Branch: {selectedBranch.name}
+                </h3>
+                <p className="text-[11px] text-slate-500">Executive modification reserved for Principal Partner.</p>
+              </div>
+              <button onClick={() => setIsEditBranchOpen(false)} className="text-slate-400 hover:text-slate-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditBranch} className="space-y-4 text-xs">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Branch Name: *</label>
+                  <input
+                    type="text"
+                    required
+                    value={editBranchForm.name}
+                    onChange={e => setEditBranchForm({ ...editBranchForm, name: e.target.value })}
+                    className="w-full p-2.5 rounded border border-slate-300"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Branch Code: *</label>
+                  <input
+                    type="text"
+                    required
+                    value={editBranchForm.code}
+                    onChange={e => setEditBranchForm({ ...editBranchForm, code: e.target.value })}
+                    className="w-full p-2.5 rounded border border-slate-300 uppercase font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">State: *</label>
+                  <input
+                    type="text"
+                    required
+                    value={editBranchForm.state}
+                    onChange={e => setEditBranchForm({ ...editBranchForm, state: e.target.value })}
+                    className="w-full p-2.5 rounded border border-slate-300"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">City / Division: *</label>
+                  <input
+                    type="text"
+                    required
+                    value={editBranchForm.city}
+                    onChange={e => setEditBranchForm({ ...editBranchForm, city: e.target.value })}
+                    className="w-full p-2.5 rounded border border-slate-300"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Physical Address: *</label>
+                <input
+                  type="text"
+                  required
+                  value={editBranchForm.address}
+                  onChange={e => setEditBranchForm({ ...editBranchForm, address: e.target.value })}
+                  className="w-full p-2.5 rounded border border-slate-300"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Official Phone: *</label>
+                  <input
+                    type="tel"
+                    required
+                    value={editBranchForm.phone}
+                    onChange={e => setEditBranchForm({ ...editBranchForm, phone: e.target.value })}
+                    className="w-full p-2.5 rounded border border-slate-300"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Official Email: *</label>
+                  <input
+                    type="email"
+                    required
+                    value={editBranchForm.email}
+                    onChange={e => setEditBranchForm({ ...editBranchForm, email: e.target.value })}
+                    className="w-full p-2.5 rounded border border-slate-300"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="flex items-center space-x-2 cursor-pointer pt-1">
+                  <input
+                    type="checkbox"
+                    checked={editBranchForm.isActive}
+                    onChange={e => setEditBranchForm({ ...editBranchForm, isActive: e.target.checked })}
+                    className="rounded text-amber-600"
+                  />
+                  <span className="font-semibold text-slate-700">Branch is Active & Operational</span>
+                </label>
+              </div>
+
+              <div className="flex justify-end space-x-2 pt-2 border-t">
+                <button
+                  type="button"
+                  onClick={() => setIsEditBranchOpen(false)}
+                  className="px-4 py-2 border rounded font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-slate-900 text-amber-400 rounded font-bold shadow-xs hover:bg-slate-800"
+                >
+                  Save Branch Changes
                 </button>
               </div>
             </form>

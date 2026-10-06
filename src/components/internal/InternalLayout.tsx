@@ -50,7 +50,6 @@ export const InternalLayout: React.FC<InternalLayoutProps> = ({
     activeBranchId, 
     isAllBranches, 
     setActiveBranchId, 
-    switchRole,
     isPrincipalPartner,
     isHeadOfChamber,
     isAdminSecretary,
@@ -61,7 +60,6 @@ export const InternalLayout: React.FC<InternalLayoutProps> = ({
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
-  const [roleSwitcherOpen, setRoleSwitcherOpen] = useState(false);
   const [availabilityDropdownOpen, setAvailabilityDropdownOpen] = useState(false);
 
   // Keyboard shortcut for search (Ctrl+K or Cmd+K)
@@ -194,77 +192,12 @@ export const InternalLayout: React.FC<InternalLayoutProps> = ({
                 <span>Public Website</span>
               </button>
 
-              {/* Role Fast-Switcher (Allows immediate testing of all 5 mandatory roles) */}
-              <div className="relative">
-                <button
-                  onClick={() => setRoleSwitcherOpen(!roleSwitcherOpen)}
-                  className="flex items-center space-x-2 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 px-2.5 py-1.5 rounded-lg text-xs transition-colors"
-                  title="Switch between the 5 Authorized Roles"
-                >
-                  <Shield className="w-3.5 h-3.5 text-amber-400" />
-                  <span className="font-semibold hidden sm:inline">
-                    {currentUser ? getRoleDisplayName(currentUser.role) : 'Select Role'}
-                  </span>
-                  <ChevronDown className="w-3 h-3 text-amber-400" />
-                </button>
-
-                {roleSwitcherOpen && (
-                  <div className="absolute right-0 mt-2 w-64 bg-white rounded-xl shadow-2xl border border-slate-200 z-50 py-2 text-slate-900">
-                    <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-500 border-b border-slate-100">
-                      Switch Active User Role (5 Roles Only)
-                    </div>
-                    <button
-                      onClick={() => { switchRole('PRINCIPAL_PARTNER'); setRoleSwitcherOpen(false); }}
-                      className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between hover:bg-slate-50 ${isPrincipalPartner ? 'font-bold text-amber-800 bg-amber-50/60' : ''}`}
-                    >
-                      <div>
-                        <p className="font-semibold">1. Principal Partner</p>
-                        <p className="text-[10px] text-slate-500">Highest authority · All branches</p>
-                      </div>
-                      {isPrincipalPartner && <span className="w-2 h-2 rounded-full bg-amber-600"></span>}
-                    </button>
-                    <button
-                      onClick={() => { switchRole('HEAD_OF_CHAMBER'); setRoleSwitcherOpen(false); }}
-                      className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between hover:bg-slate-50 ${isHeadOfChamber ? 'font-bold text-amber-800 bg-amber-50/60' : ''}`}
-                    >
-                      <div>
-                        <p className="font-semibold">2. Head of Chamber</p>
-                        <p className="text-[10px] text-slate-500">Branch operational leader</p>
-                      </div>
-                      {isHeadOfChamber && <span className="w-2 h-2 rounded-full bg-amber-600"></span>}
-                    </button>
-                    <button
-                      onClick={() => { switchRole('ADMINISTRATOR_SECRETARY'); setRoleSwitcherOpen(false); }}
-                      className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between hover:bg-slate-50 ${isAdminSecretary ? 'font-bold text-amber-800 bg-amber-50/60' : ''}`}
-                    >
-                      <div>
-                        <p className="font-semibold">3. Administrator / Secretary</p>
-                        <p className="text-[10px] text-slate-500">Intake, dates, scheduling</p>
-                      </div>
-                      {isAdminSecretary && <span className="w-2 h-2 rounded-full bg-amber-600"></span>}
-                    </button>
-                    <button
-                      onClick={() => { switchRole('ACCOUNT_OFFICER'); setRoleSwitcherOpen(false); }}
-                      className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between hover:bg-slate-50 ${isAccountOfficer ? 'font-bold text-amber-800 bg-amber-50/60' : ''}`}
-                    >
-                      <div>
-                        <p className="font-semibold">4. Account Officer</p>
-                        <p className="text-[10px] text-slate-500">Invoices, payments & audit</p>
-                      </div>
-                      {isAccountOfficer && <span className="w-2 h-2 rounded-full bg-amber-600"></span>}
-                    </button>
-                    <button
-                      onClick={() => { switchRole('COUNSEL_STAFF'); setRoleSwitcherOpen(false); }}
-                      className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between hover:bg-slate-50 ${isCounselStaff ? 'font-bold text-amber-800 bg-amber-50/60' : ''}`}
-                    >
-                      <div>
-                        <p className="font-semibold">5. Counsel / Staff</p>
-                        <p className="text-[10px] text-slate-500">Assigned cases, tasks, court</p>
-                      </div>
-                      {isCounselStaff && <span className="w-2 h-2 rounded-full bg-amber-600"></span>}
-                    </button>
-                  </div>
-                )}
+              {/* Authenticated Role Badge - Strictly fixed to authenticated account, no switching allowed */}
+              <div className="flex items-center space-x-1.5 bg-slate-900 border border-slate-800 text-amber-300 px-3 py-1.5 rounded-lg text-xs font-semibold shadow-xs select-none">
+                <Shield className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <span className="font-mono text-[11px] uppercase tracking-wide">
+                  {currentUser ? getRoleDisplayName(currentUser.role) : ''}
+                </span>
               </div>
             </div>
           </div>

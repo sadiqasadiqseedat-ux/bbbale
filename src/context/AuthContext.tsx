@@ -54,7 +54,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (user && user.isActive && user.accountStatus !== 'Suspended') {
         setCurrentUser(user);
         setSession(currentSession);
-        setActiveBranchIdState(user.role === 'PRINCIPAL_PARTNER' ? storageService.getActiveBranchId() : user.branchId);
+        if (user.role === 'PRINCIPAL_PARTNER') {
+          setActiveBranchIdState(storageService.getActiveBranchId());
+        } else {
+          setActiveBranchIdState(user.branchId);
+          setIsAllBranches(false);
+        }
       } else {
         storageService.logoutUser();
         setCurrentUser(null);
@@ -150,11 +155,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const setActiveBranchId = (branchId: string) => {
+    if (currentUser?.role !== 'PRINCIPAL_PARTNER') return;
     if (branchId === 'ALL_BRANCHES') {
-      if (currentUser?.role === 'PRINCIPAL_PARTNER') {
-        setIsAllBranches(true);
-        setActiveBranchIdState('ALL_BRANCHES');
-      }
+      setIsAllBranches(true);
+      setActiveBranchIdState('ALL_BRANCHES');
     } else {
       setIsAllBranches(false);
       setActiveBranchIdState(branchId);

@@ -159,6 +159,7 @@ export interface CaseRecord {
   suitNumber: string;
   matterId: string;
   clientId: string;
+  branchId?: string;
   courtId: string;
   judicialDivision: string;
   judge?: string;
@@ -179,6 +180,7 @@ export interface CaseAssignment {
   id: string;
   caseId: string;
   suitNumber: string;
+  branchId?: string;
   counselId: string;
   assignedById: string;
   assignedByName: string;
@@ -193,6 +195,7 @@ export interface CourtDiaryEntry {
   id: string;
   caseId: string;
   suitNumber: string;
+  branchId?: string;
   courtDate: string;
   courtTime?: string;
   courtName: string;
@@ -210,6 +213,7 @@ export interface Task {
   title: string;
   assignedToId: string;
   assignedById: string;
+  branchId?: string;
   matterId?: string;
   caseId?: string;
   priority: 'Low' | 'Medium' | 'High' | 'Urgent';
@@ -224,6 +228,7 @@ export interface DocumentRecord {
   id: string;
   documentId: string;
   title: string;
+  branchId?: string;
   category: 
     | 'Client Documents'
     | 'Court Documents'
@@ -258,6 +263,7 @@ export interface DocumentRecord {
 export interface Correspondence {
   id: string;
   referenceNumber: string;
+  branchId?: string;
   type: 'Letter' | 'Email' | 'Notice' | 'Demand' | 'Court Correspondence' | 'Institutional Communication';
   date: string;
   sender: string;
@@ -275,6 +281,7 @@ export interface LegalResearch {
   id: string;
   topic: string;
   legalIssue: string;
+  branchId?: string;
   statutes: string;
   caseAuthorities: string;
   legalNotes: string;
@@ -304,6 +311,7 @@ export interface Appointment {
 export interface Property {
   id: string;
   propertyId: string;
+  branchId?: string;
   name: string;
   propertyType: 
     | 'Residential House'
@@ -443,6 +451,7 @@ export interface Invoice {
   clientEmail: string;
   clientPhone: string;
   matterId?: string;
+  branchId?: string;
   consultationId?: string;
   consultationCode?: string;
   items: InvoiceItem[];
@@ -452,6 +461,9 @@ export interface Invoice {
   date: string;
   dueDate: string;
   paymentStatus: 'UNPAID' | 'PAYMENT_SUBMITTED' | 'PAYMENT_VERIFIED' | 'CANCELLED';
+  approvalStatus?: 'NONE' | 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED';
+  approvalRequestId?: string;
+  approvalNotes?: string;
   paymentReference: string;
   paymentMethod?: string;
   notes?: string;
@@ -463,6 +475,7 @@ export interface PaymentRecord {
   invoiceNumber: string;
   clientName: string;
   amount: number;
+  branchId?: string;
   paymentMethod: 'Bank Transfer' | 'Online Payment Gateway' | 'POS' | 'Cash' | 'Other';
   paymentDate: string;
   status: 'PAYMENT_SUBMITTED' | 'PAYMENT_VERIFIED' | 'REJECTED';
@@ -478,6 +491,7 @@ export interface PaymentRecord {
 
 export interface ExpenseRecord {
   id: string;
+  branchId?: string;
   accountType: 'Law Firm Revenue' | 'Client Funds' | 'Property Account';
   category: 'Court expenses' | 'Filing expenses' | 'Transportation' | 'Service expenses' | 'Property expenses' | 'Maintenance expenses' | 'Administrative expenses' | 'Other approved expenses';
   amount: number;
@@ -601,13 +615,14 @@ export interface PublicEnquiry {
 
 export interface ApprovalRequest {
   id: string;
-  requestType: 'Head of Chamber Action' | 'Fee Adjustment' | 'Notice of Premises' | 'Settlement Proposal' | 'Public Content Publication';
+  requestType: 'Head of Chamber Action' | 'Fee Adjustment' | 'Notice of Premises' | 'Settlement Proposal' | 'Public Content Publication' | 'Invoice Billing Approval';
   requesterId: string;
   requesterName: string;
   requesterRole: UserRole;
   branchId: string;
   title: string;
   description: string;
+  referenceCode?: string;
   status: 'PENDING_PRINCIPAL_PARTNER_APPROVAL' | 'APPROVED' | 'REJECTED';
   submittedAt: string;
   decidedAt?: string;
