@@ -1190,6 +1190,20 @@ export const storageService = {
     logAudit(actor, 'CREATE_INVOICE', 'Invoice', newInvoice.id, `Generated invoice ${invoiceNumber} for ${newInvoice.clientName} (₦${newInvoice.totalAmount.toLocaleString()})`);
     return newInvoice;
   },
+  updateInvoice: (updatedInvoice: Invoice, actor: User): { success: boolean; error?: string } => {
+    if (actor.role !== 'PRINCIPAL_PARTNER' && actor.role !== 'HEAD_OF_CHAMBER') {
+      return { success: false, error: 'Unauthorized: Only the Principal Partner or Head of Chamber can edit invoice details.' };
+    }
+    const invoices = storageService.getInvoices();
+    const existing = invoices.find(i => i.id === updatedInvoice.id);
+    if (!existing) {
+      return { success: false, error: 'Invoice not found in Chambers registry.' };
+    }
+    const updated = invoices.map(i => i.id === updatedInvoice.id ? updatedInvoice : i);
+    setToStorage(STORAGE_KEYS.INVOICES, updated);
+    logAudit(actor, 'UPDATE_INVOICE', 'Invoice', updatedInvoice.id, `${actor.name} edited invoice ${updatedInvoice.invoiceNumber} for ${updatedInvoice.clientName}`);
+    return { success: true };
+  },
   submitInvoiceForApproval: (invoiceCode: string, reason: string, actor: User): { success: boolean; request?: ApprovalRequest; error?: string } => {
     const invoices = storageService.getInvoices();
     const invoice = invoices.find(i => i.invoiceNumber.trim().toUpperCase() === invoiceCode.trim().toUpperCase());
