@@ -32,13 +32,24 @@ import {
   ApprovalRequest,
   NotificationItem,
   AuditLog,
-  UserRole
+  UserRole,
+  UserSession,
+  WebsiteContent
 } from '../types';
+import { 
+  generateSalt, 
+  hashPassword, 
+  verifyPassword, 
+  generateSecureToken, 
+  validatePasswordStrength 
+} from './crypto';
 
-// INITIAL AUTHORIZED PERSONNEL - THE 5 ROLES
+// INITIAL AUTHORIZED PERSONNEL - EXACTLY 5 ROLES
+// All initial accounts start with username and requiresPasswordChange: true
 const INITIAL_USERS: User[] = [
   {
     id: 'usr-principal-01',
+    username: 'principal.partner',
     name: 'Barrister B. B. Bale, SAN, FCIArb',
     email: 'principal@bbbalechambers.ng',
     phone: '+234 803 200 1100',
@@ -51,10 +62,16 @@ const INITIAL_USERS: User[] = [
     availability: 'AVAILABLE',
     isPubliclyVisible: true,
     isActive: true,
+    accountStatus: 'Active',
+    salt: 'a1b2c3d4e5f60718',
+    passwordHash: '', // Initialized in initializeStorage
+    requiresPasswordChange: true,
+    failedLoginAttempts: 0,
     createdAt: '2026-01-01T00:00:00.000Z'
   },
   {
     id: 'usr-hoc-01',
+    username: 'head.chamber',
     name: 'Barrister Aisha M. Bello, LL.M',
     email: 'hoc.abuja@bbbalechambers.ng',
     phone: '+234 802 333 4455',
@@ -67,10 +84,16 @@ const INITIAL_USERS: User[] = [
     availability: 'IN_OFFICE',
     isPubliclyVisible: true,
     isActive: true,
+    accountStatus: 'Active',
+    salt: 'b2c3d4e5f6071829',
+    passwordHash: '',
+    requiresPasswordChange: true,
+    failedLoginAttempts: 0,
     createdAt: '2026-01-01T00:00:00.000Z'
   },
   {
     id: 'usr-admin-01',
+    username: 'administrator',
     name: 'Fatima Garba, B.Sc, CIPM',
     email: 'secretary@bbbalechambers.ng',
     phone: '+234 809 555 1212',
@@ -78,15 +101,21 @@ const INITIAL_USERS: User[] = [
     branchId: 'br-abuja-01',
     title: 'Chambers Administrator & Legal Secretary',
     practiceAreas: ['Chambers Operations', 'Court Filings Logistics', 'Client Intake Registry'],
-    bio: 'Oversees chambers intake, court fixture registries, appointment schedules, and student placement logistics.',
+    bio: 'Oversees chambers intake, court fixture registries, appointment schedules, website content, and student placement logistics.',
     photoUrl: 'https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&q=80&w=600',
     availability: 'AVAILABLE',
     isPubliclyVisible: false,
     isActive: true,
+    accountStatus: 'Active',
+    salt: 'c3d4e5f60718293a',
+    passwordHash: '',
+    requiresPasswordChange: true,
+    failedLoginAttempts: 0,
     createdAt: '2026-01-01T00:00:00.000Z'
   },
   {
     id: 'usr-account-01',
+    username: 'accounts',
     name: 'Chukwuemeka Okonkwo, ACA, ACTI',
     email: 'accounts@bbbalechambers.ng',
     phone: '+234 806 888 9900',
@@ -99,10 +128,16 @@ const INITIAL_USERS: User[] = [
     availability: 'AVAILABLE',
     isPubliclyVisible: false,
     isActive: true,
+    accountStatus: 'Active',
+    salt: 'd4e5f60718293a4b',
+    passwordHash: '',
+    requiresPasswordChange: true,
+    failedLoginAttempts: 0,
     createdAt: '2026-01-01T00:00:00.000Z'
   },
   {
     id: 'usr-counsel-01',
+    username: 'counsel',
     name: 'Barrister Tunde Adeleke, BL',
     email: 'tunde.adeleke@bbbalechambers.ng',
     phone: '+234 813 444 7788',
@@ -115,6 +150,11 @@ const INITIAL_USERS: User[] = [
     availability: 'IN_COURT',
     isPubliclyVisible: true,
     isActive: true,
+    accountStatus: 'Active',
+    salt: 'e5f60718293a4b5c',
+    passwordHash: '',
+    requiresPasswordChange: true,
+    failedLoginAttempts: 0,
     createdAt: '2026-01-01T00:00:00.000Z'
   }
 ];
@@ -236,7 +276,7 @@ const INITIAL_COURTS: Court[] = [
   }
 ];
 
-// INITIAL PARTNER INSTITUTIONS FOR LAW STUDENTS
+// INITIAL PARTNER INSTITUTIONS
 const INITIAL_INSTITUTIONS: Institution[] = [
   {
     id: 'inst-01',
@@ -322,9 +362,25 @@ const INITIAL_PUBLIC_NOTICES: PublicNotice[] = [
   }
 ];
 
+// INITIAL DYNAMIC WEBSITE CONTENT (MANAGED VIA CMS)
+const INITIAL_WEBSITE_CONTENT: WebsiteContent = {
+  tagline: 'Secure. Organized. Professional.',
+  heroHeadline: 'Secure. Organized. Professional.',
+  heroSubheadline: 'Distinguished legal representation, trial advocacy, property & recovery of premises management, Islamic law jurisprudence, and institutional law-student mentorship across Nigeria.',
+  aboutStory: 'B. B. BALE & CO. CHAMBERS was established to provide distinguished corporate entities, institutions, and individuals with uncompromising legal defense and advisory services. From our principal chambers in the Federal Capital Territory, Abuja, our footprint extends across commercial hubs in Lagos, Kano, and Port Harcourt. Our trial and appellate practice is built on comprehensive statutory analysis, painstaking factual investigation, and respectful yet incisive courtroom advocacy.',
+  aboutFoundingYear: '1996',
+  officeHoursText: 'Mondays through Fridays: 8:00 AM - 5:30 PM (Court Recess Excluded). In-person client conferences and virtual consultations are scheduled upon verified booking.',
+  emergencyHotline: '+234 803 200 1100',
+  consultationFeeStandard: 35000,
+  internshipPolicyNotice: 'Chambers welcomes Bar Part II externs from the Nigerian Law School and law undergraduates from recognized universities.',
+  recoveryOfPremisesNotice: 'Statutory notice periods must not be mechanically applied; each notice is formulated in accordance with applicable State tenancy legislation and agreements.',
+  lastUpdated: new Date().toISOString(),
+  updatedBy: 'Barrister B. B. Bale, SAN'
+};
+
 // STORAGE KEYS
 const STORAGE_KEYS = {
-  USERS: 'bb_users_v1',
+  USERS: 'bb_users_v2',
   BRANCHES: 'bb_branches_v1',
   COURTS: 'bb_courts_v1',
   INSTITUTIONS: 'bb_institutions_v1',
@@ -357,7 +413,8 @@ const STORAGE_KEYS = {
   APPROVALS: 'bb_approvals_v1',
   NOTIFICATIONS: 'bb_notifications_v1',
   AUDIT_LOGS: 'bb_audit_logs_v1',
-  CURRENT_USER_ID: 'bb_current_user_id_v1',
+  AUTH_SESSION: 'bb_auth_session_v2',
+  WEBSITE_CONTENT: 'bb_website_content_v1',
   ACTIVE_BRANCH_ID: 'bb_active_branch_id_v1',
   SYSTEM_COUNTERS: 'bb_counters_v1'
 };
@@ -415,7 +472,7 @@ function getNextNumber(type: string, prefix: string): string {
 
 // LOG AUDIT TRAIL
 export function logAudit(
-  user: { id: string; name: string; role: UserRole },
+  user: { id?: string; name: string; role?: UserRole },
   action: string,
   entity: string,
   entityId: string,
@@ -425,9 +482,9 @@ export function logAudit(
   const newLog: AuditLog = {
     id: `audit-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
     timestamp: new Date().toISOString(),
-    userId: user.id,
+    userId: user.id || 'system',
     userName: user.name,
-    userRole: user.role,
+    userRole: user.role || 'ADMINISTRATOR_SECRETARY',
     action,
     entity,
     entityId,
@@ -461,10 +518,25 @@ export function dispatchNotification(
 }
 
 // INITIALIZE STORE ONCE IF EMPTY
-export function initializeStorage(): void {
-  if (!localStorage.getItem(STORAGE_KEYS.USERS)) {
-    localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(INITIAL_USERS));
+export async function initializeStorage(): Promise<void> {
+  const existingUsers = localStorage.getItem(STORAGE_KEYS.USERS);
+  if (!existingUsers) {
+    // Generate initial password hashes for the default accounts
+    // Initial setup password standard: Chambers@2026!
+    const defaultSetupPassword = 'Chambers@2026!';
+    const initializedUsers: User[] = [];
+    
+    for (const u of INITIAL_USERS) {
+      const hash = await hashPassword(defaultSetupPassword, u.salt);
+      initializedUsers.push({
+        ...u,
+        passwordHash: hash,
+        requiresPasswordChange: true
+      });
+    }
+    localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(initializedUsers));
   }
+
   if (!localStorage.getItem(STORAGE_KEYS.BRANCHES)) {
     localStorage.setItem(STORAGE_KEYS.BRANCHES, JSON.stringify(INITIAL_BRANCHES));
   }
@@ -477,23 +549,438 @@ export function initializeStorage(): void {
   if (!localStorage.getItem(STORAGE_KEYS.PUBLIC_NOTICES)) {
     localStorage.setItem(STORAGE_KEYS.PUBLIC_NOTICES, JSON.stringify(INITIAL_PUBLIC_NOTICES));
   }
-  if (!localStorage.getItem(STORAGE_KEYS.CURRENT_USER_ID)) {
-    localStorage.setItem(STORAGE_KEYS.CURRENT_USER_ID, JSON.stringify('usr-principal-01'));
+  if (!localStorage.getItem(STORAGE_KEYS.WEBSITE_CONTENT)) {
+    localStorage.setItem(STORAGE_KEYS.WEBSITE_CONTENT, JSON.stringify(INITIAL_WEBSITE_CONTENT));
   }
 }
 
 // STORE REPOSITORY API
 export const storageService = {
+  // Website Content Management (CMS)
+  getWebsiteContent: (): WebsiteContent => {
+    return getFromStorage<WebsiteContent>(STORAGE_KEYS.WEBSITE_CONTENT, INITIAL_WEBSITE_CONTENT);
+  },
+  updateWebsiteContent: (content: Partial<WebsiteContent>, actor: User): WebsiteContent => {
+    const current = storageService.getWebsiteContent();
+    const updated: WebsiteContent = {
+      ...current,
+      ...content,
+      lastUpdated: new Date().toISOString(),
+      updatedBy: actor.name
+    };
+    setToStorage(STORAGE_KEYS.WEBSITE_CONTENT, updated);
+    logAudit(actor, 'UPDATE_WEBSITE_CONTENT', 'WebsiteContent', 'cms-main', `Updated dynamic Chambers website content`);
+    return updated;
+  },
+
   // Users & Staff
   getUsers: (): User[] => getFromStorage<User[]>(STORAGE_KEYS.USERS, INITIAL_USERS),
   getUserById: (id: string): User | undefined => {
     return storageService.getUsers().find(u => u.id === id);
   },
-  updateUser: (user: User, actor: User): void => {
-    const users = storageService.getUsers().map(u => u.id === user.id ? user : u);
-    setToStorage(STORAGE_KEYS.USERS, users);
-    logAudit(actor, 'UPDATE_USER', 'User', user.id, `Updated user profile: ${user.name}`);
+  getUserByUsernameOrEmail: (identifier: string): User | undefined => {
+    const clean = identifier.trim().toLowerCase();
+    return storageService.getUsers().find(
+      u => u.username.toLowerCase() === clean || u.email.toLowerCase() === clean
+    );
   },
+
+  // Authentication & Session
+  authenticateUser: async (identifier: string, password: string, rememberMe: boolean = false): Promise<{
+    success: boolean;
+    user?: User;
+    session?: UserSession;
+    error?: string;
+    requiresPasswordChange?: boolean;
+  }> => {
+    const user = storageService.getUserByUsernameOrEmail(identifier);
+    if (!user) {
+      logAudit({ name: identifier }, 'FAILED_LOGIN_ATTEMPT', 'Session', identifier, `Failed login attempt: User not found`);
+      return { success: false, error: 'Invalid username/email or password.' };
+    }
+
+    // Check account status
+    if (user.accountStatus === 'Suspended') {
+      logAudit(user, 'LOGIN_BLOCKED_SUSPENDED', 'User', user.id, `Login blocked: Account suspended`);
+      return { success: false, error: 'Your account has been suspended. Please consult the Principal Partner.' };
+    }
+
+    if (user.accountStatus === 'Inactive' || !user.isActive) {
+      logAudit(user, 'LOGIN_BLOCKED_INACTIVE', 'User', user.id, `Login blocked: Account is inactive`);
+      return { success: false, error: 'Your account is deactivated. Please consult Chambers Administration.' };
+    }
+
+    if (user.accountStatus === 'Archived') {
+      return { success: false, error: 'This user account has been archived.' };
+    }
+
+    // Verify password hash
+    const isValid = await verifyPassword(password, user.salt, user.passwordHash);
+    if (!isValid) {
+      const users = storageService.getUsers().map(u => {
+        if (u.id === user.id) {
+          return { ...u, failedLoginAttempts: (u.failedLoginAttempts || 0) + 1 };
+        }
+        return u;
+      });
+      setToStorage(STORAGE_KEYS.USERS, users);
+      logAudit(user, 'FAILED_PASSWORD_ATTEMPT', 'User', user.id, `Incorrect password entered for ${user.username}`);
+      return { success: false, error: 'Invalid username/email or password.' };
+    }
+
+    // Reset failed login attempts and update lastLogin
+    const users = storageService.getUsers().map(u => {
+      if (u.id === user.id) {
+        return {
+          ...u,
+          failedLoginAttempts: 0,
+          lastLogin: new Date().toISOString()
+        };
+      }
+      return u;
+    });
+    setToStorage(STORAGE_KEYS.USERS, users);
+
+    // Create session
+    const token = generateSecureToken();
+    const expiryDuration = rememberMe ? 30 * 24 * 3600 * 1000 : 8 * 3600 * 1000; // 30 days vs 8 hours
+    const expiresAt = new Date(Date.now() + expiryDuration).toISOString();
+
+    const session: UserSession = {
+      userId: user.id,
+      token,
+      role: user.role,
+      branchId: user.branchId,
+      rememberMe,
+      expiresAt
+    };
+
+    setToStorage(STORAGE_KEYS.AUTH_SESSION, session);
+    logAudit(user, 'USER_LOGIN_SUCCESS', 'Session', user.id, `User authenticated successfully: ${user.name} (${user.role})`);
+
+    return {
+      success: true,
+      user,
+      session,
+      requiresPasswordChange: user.requiresPasswordChange
+    };
+  },
+
+  getCurrentSession: (): UserSession | null => {
+    const session = getFromStorage<UserSession | null>(STORAGE_KEYS.AUTH_SESSION, null);
+    if (!session) return null;
+    if (new Date(session.expiresAt) < new Date()) {
+      localStorage.removeItem(STORAGE_KEYS.AUTH_SESSION);
+      return null;
+    }
+    return session;
+  },
+
+  setUserSession: (session: UserSession): void => {
+    setToStorage(STORAGE_KEYS.AUTH_SESSION, session);
+  },
+
+  logoutUser: (actor?: User): void => {
+    if (actor) {
+      logAudit(actor, 'USER_LOGOUT', 'Session', actor.id, `User logged out: ${actor.name}`);
+    }
+    localStorage.removeItem(STORAGE_KEYS.AUTH_SESSION);
+    notifySubscribers();
+  },
+
+  // Password Management
+  changePassword: async (userId: string, currentPassword: string, newPassword: string): Promise<{
+    success: boolean;
+    error?: string;
+  }> => {
+    const user = storageService.getUserById(userId);
+    if (!user) return { success: false, error: 'User not found' };
+
+    // Verify current password
+    const isCurrentValid = await verifyPassword(currentPassword, user.salt, user.passwordHash);
+    if (!isCurrentValid) {
+      return { success: false, error: 'Current password does not match our records.' };
+    }
+
+    // Validate new password strength
+    const strength = validatePasswordStrength(newPassword);
+    if (!strength.isValid) {
+      return { success: false, error: strength.errors[0] };
+    }
+
+    // Generate new salt and hash
+    const newSalt = generateSalt();
+    const newHash = await hashPassword(newPassword, newSalt);
+
+    const users = storageService.getUsers().map(u => {
+      if (u.id === userId) {
+        return {
+          ...u,
+          salt: newSalt,
+          passwordHash: newHash,
+          requiresPasswordChange: false,
+          accountStatus: u.accountStatus === 'Password Reset Required' ? ('Active' as const) : u.accountStatus,
+          passwordChangedAt: new Date().toISOString()
+        };
+      }
+      return u;
+    });
+
+    setToStorage(STORAGE_KEYS.USERS, users);
+    logAudit(user, 'PASSWORD_CHANGE_SUCCESS', 'User', userId, `Password updated successfully for ${user.username}`);
+    return { success: true };
+  },
+
+  adminResetUserPassword: async (targetUserId: string, actor: User): Promise<{
+    success: boolean;
+    temporaryPassword?: string;
+    error?: string;
+  }> => {
+    const targetUser = storageService.getUserById(targetUserId);
+    if (!targetUser) return { success: false, error: 'Target user not found' };
+
+    // Protect Principal Partner: Head of Chamber / Admin CANNOT reset Principal Partner
+    if (targetUser.role === 'PRINCIPAL_PARTNER' && actor.role !== 'PRINCIPAL_PARTNER') {
+      return { success: false, error: 'Unauthorized: Only the Principal Partner can modify or reset their own credentials.' };
+    }
+
+    const tempPassword = `Reset@${Math.floor(100000 + Math.random() * 900000)}!`;
+    const newSalt = generateSalt();
+    const newHash = await hashPassword(tempPassword, newSalt);
+
+    const users = storageService.getUsers().map(u => {
+      if (u.id === targetUserId) {
+        return {
+          ...u,
+          salt: newSalt,
+          passwordHash: newHash,
+          requiresPasswordChange: true,
+          accountStatus: 'Password Reset Required' as const,
+          passwordChangedAt: new Date().toISOString()
+        };
+      }
+      return u;
+    });
+
+    setToStorage(STORAGE_KEYS.USERS, users);
+    logAudit(actor, 'ADMIN_PASSWORD_RESET', 'User', targetUserId, `${actor.name} (${actor.role}) reset password for ${targetUser.name} (${targetUser.username})`);
+    return { success: true, temporaryPassword: tempPassword };
+  },
+
+  requestPasswordReset: (identifier: string): {
+    success: boolean;
+    message: string;
+    resetToken?: string;
+  } => {
+    const user = storageService.getUserByUsernameOrEmail(identifier);
+    if (!user) {
+      // Don't leak user existence
+      return { success: true, message: 'If an authorized Chambers account matches that identifier, reset instructions have been dispatched.' };
+    }
+
+    const token = generateSecureToken();
+    const expires = new Date(Date.now() + 3600000).toISOString(); // 1 hour
+
+    const users = storageService.getUsers().map(u => {
+      if (u.id === user.id) {
+        return {
+          ...u,
+          temporaryResetToken: token,
+          temporaryResetExpires: expires
+        };
+      }
+      return u;
+    });
+
+    setToStorage(STORAGE_KEYS.USERS, users);
+    logAudit(user, 'PASSWORD_RESET_REQUESTED', 'User', user.id, `Password reset token requested for ${user.username}`);
+    dispatchNotification('Password Reset Requested', `A password reset token was generated for ${user.name} (${user.username}).`, 'warning', 'PRINCIPAL_PARTNER');
+
+    return { 
+      success: true, 
+      message: 'Reset instructions have been generated. Use the secure authorization token or contact the Administrator.',
+      resetToken: token
+    };
+  },
+
+  completePasswordResetWithToken: async (token: string, newPassword: string): Promise<{
+    success: boolean;
+    error?: string;
+  }> => {
+    const usersList = storageService.getUsers();
+    const user = usersList.find(u => u.temporaryResetToken === token);
+
+    if (!user || !user.temporaryResetExpires || new Date(user.temporaryResetExpires) < new Date()) {
+      return { success: false, error: 'Invalid or expired password reset token.' };
+    }
+
+    const strength = validatePasswordStrength(newPassword);
+    if (!strength.isValid) {
+      return { success: false, error: strength.errors[0] };
+    }
+
+    const newSalt = generateSalt();
+    const newHash = await hashPassword(newPassword, newSalt);
+
+    const updated = usersList.map(u => {
+      if (u.id === user.id) {
+        return {
+          ...u,
+          salt: newSalt,
+          passwordHash: newHash,
+          temporaryResetToken: undefined,
+          temporaryResetExpires: undefined,
+          requiresPasswordChange: false,
+          accountStatus: 'Active' as const,
+          passwordChangedAt: new Date().toISOString()
+        };
+      }
+      return u;
+    });
+
+    setToStorage(STORAGE_KEYS.USERS, updated);
+    logAudit(user, 'PASSWORD_RESET_COMPLETED', 'User', user.id, `Password reset completed via token for ${user.username}`);
+    return { success: true };
+  },
+
+  // User Account CRUD
+  createUserAccount: async (data: {
+    username: string;
+    name: string;
+    email: string;
+    phone: string;
+    role: UserRole;
+    branchId: string;
+    title: string;
+    practiceAreas: string[];
+    bio: string;
+    photoUrl: string;
+    initialPassword?: string;
+  }, actor: User): Promise<{ success: boolean; user?: User; error?: string }> => {
+    // Validate authority: Only Principal Partner or Head of Chamber
+    if (actor.role !== 'PRINCIPAL_PARTNER' && actor.role !== 'HEAD_OF_CHAMBER') {
+      return { success: false, error: 'Unauthorized: Only the Principal Partner or Head of Chamber can create accounts.' };
+    }
+
+    // Head of Chamber cannot create Principal Partner accounts
+    if (data.role === 'PRINCIPAL_PARTNER' && actor.role !== 'PRINCIPAL_PARTNER') {
+      return { success: false, error: 'Unauthorized: Only the Principal Partner can provision Principal Partner accounts.' };
+    }
+
+    // Check unique username and email
+    const cleanUsername = data.username.trim().toLowerCase();
+    const cleanEmail = data.email.trim().toLowerCase();
+    const existing = storageService.getUsers().find(
+      u => u.username.toLowerCase() === cleanUsername || u.email.toLowerCase() === cleanEmail
+    );
+    if (existing) {
+      return { success: false, error: 'Username or email already assigned to an existing personnel account.' };
+    }
+
+    const initialPwd = data.initialPassword || 'Chambers@2026!';
+    const salt = generateSalt();
+    const hash = await hashPassword(initialPwd, salt);
+
+    const newUser: User = {
+      id: `usr-${Date.now()}`,
+      username: cleanUsername,
+      name: data.name,
+      email: data.email,
+      phone: data.phone,
+      role: data.role,
+      branchId: data.branchId,
+      title: data.title,
+      practiceAreas: data.practiceAreas,
+      bio: data.bio,
+      photoUrl: data.photoUrl || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=600',
+      availability: 'AVAILABLE',
+      isPubliclyVisible: data.role === 'COUNSEL_STAFF' || data.role === 'HEAD_OF_CHAMBER' || data.role === 'PRINCIPAL_PARTNER',
+      isActive: true,
+      accountStatus: 'Active',
+      salt,
+      passwordHash: hash,
+      requiresPasswordChange: true,
+      failedLoginAttempts: 0,
+      createdAt: new Date().toISOString()
+    };
+
+    const users = storageService.getUsers();
+    setToStorage(STORAGE_KEYS.USERS, [...users, newUser]);
+    logAudit(actor, 'CREATE_USER_ACCOUNT', 'User', newUser.id, `${actor.name} created account for ${newUser.name} (${newUser.username}) as ${newUser.role}`);
+    return { success: true, user: newUser };
+  },
+
+  updateUserAccount: (updatedUser: User, actor: User): { success: boolean; error?: string } => {
+    const existing = storageService.getUserById(updatedUser.id);
+    if (!existing) return { success: false, error: 'User not found' };
+
+    // PRINCIPAL PARTNER PROTECTION:
+    // If the existing user is the Principal Partner:
+    // Only the Principal Partner can update their own account, and they cannot demote themselves or disable their own account.
+    if (existing.role === 'PRINCIPAL_PARTNER') {
+      if (actor.id !== existing.id) {
+        return { success: false, error: 'Protected Account: The Principal Partner account cannot be modified by other users.' };
+      }
+      if (updatedUser.role !== 'PRINCIPAL_PARTNER' || !updatedUser.isActive || updatedUser.accountStatus !== 'Active') {
+        return { success: false, error: 'Protected Account: The system must maintain an active Principal Partner account.' };
+      }
+    }
+
+    // Head of Chamber cannot promote anyone to Principal Partner
+    if (updatedUser.role === 'PRINCIPAL_PARTNER' && actor.role !== 'PRINCIPAL_PARTNER') {
+      return { success: false, error: 'Unauthorized: Only the Principal Partner can assign the Principal Partner role.' };
+    }
+
+    const users = storageService.getUsers().map(u => u.id === updatedUser.id ? updatedUser : u);
+    setToStorage(STORAGE_KEYS.USERS, users);
+    logAudit(actor, 'UPDATE_USER_ACCOUNT', 'User', updatedUser.id, `${actor.name} updated account details for ${updatedUser.name} (${updatedUser.username})`);
+    return { success: true };
+  },
+
+  setUserStatus: (targetUserId: string, newStatus: User['accountStatus'], actor: User): { success: boolean; error?: string } => {
+    const target = storageService.getUserById(targetUserId);
+    if (!target) return { success: false, error: 'User not found' };
+
+    // PRINCIPAL PARTNER PROTECTION:
+    if (target.role === 'PRINCIPAL_PARTNER') {
+      return { success: false, error: 'Protected Account: The Principal Partner account cannot be deactivated or suspended.' };
+    }
+
+    const isActive = newStatus === 'Active';
+    const users = storageService.getUsers().map(u => {
+      if (u.id === targetUserId) {
+        return { ...u, accountStatus: newStatus, isActive };
+      }
+      return u;
+    });
+
+    setToStorage(STORAGE_KEYS.USERS, users);
+    logAudit(actor, 'SET_USER_STATUS', 'User', targetUserId, `${actor.name} changed account status of ${target.name} to ${newStatus}`);
+    return { success: true };
+  },
+
+  deleteUserAccount: (targetUserId: string, actor: User): { success: boolean; error?: string } => {
+    const target = storageService.getUserById(targetUserId);
+    if (!target) return { success: false, error: 'User not found' };
+
+    // PRINCIPAL PARTNER PROTECTION:
+    if (target.role === 'PRINCIPAL_PARTNER') {
+      return { success: false, error: 'Protected Account: The Principal Partner account cannot be deleted or removed.' };
+    }
+
+    // Archive instead of hard delete
+    const users = storageService.getUsers().map(u => {
+      if (u.id === targetUserId) {
+        return { ...u, accountStatus: 'Archived' as const, isActive: false };
+      }
+      return u;
+    });
+
+    setToStorage(STORAGE_KEYS.USERS, users);
+    logAudit(actor, 'ARCHIVE_USER_ACCOUNT', 'User', targetUserId, `${actor.name} archived personnel account ${target.name} (${target.username})`);
+    return { success: true };
+  },
+
   updateCounselAvailability: (userId: string, availability: User['availability'], actor: User): void => {
     const users = storageService.getUsers().map(u => {
       if (u.id === userId) {
@@ -574,7 +1061,7 @@ export const storageService = {
     const code = getNextNumber('consultation', 'CONS');
     const invoiceNumber = getNextNumber('invoice', 'INV');
     const paymentRef = getNextNumber('payment', 'PAY');
-    const fee = data.feeAmount || 35000; // Standard initial consultation fee in Naira
+    const fee = data.feeAmount || 35000;
 
     const newConsultation: Consultation = {
       id: `cons-${Date.now()}`,
@@ -621,11 +1108,9 @@ export const storageService = {
 
     setToStorage(STORAGE_KEYS.CONSULTATIONS, [newConsultation, ...consultations]);
     
-    // Save invoice
     const invoices = storageService.getInvoices();
     setToStorage(STORAGE_KEYS.INVOICES, [newInvoice, ...invoices]);
 
-    // Dispatch internal notification
     dispatchNotification(
       'New Consultation Booking',
       `Booking received from ${data.fullName} (${code}). Invoice ${invoiceNumber} created.`,
@@ -694,7 +1179,6 @@ export const storageService = {
     };
     setToStorage(STORAGE_KEYS.PAYMENTS, [newPayment, ...payments]);
 
-    // Update invoice status
     const invoices = storageService.getInvoices().map(inv => {
       if (inv.invoiceNumber === data.invoiceNumber || inv.paymentReference === data.paymentReference) {
         return { ...inv, paymentStatus: 'PAYMENT_SUBMITTED' as const, paymentMethod: data.paymentMethod };
@@ -703,7 +1187,6 @@ export const storageService = {
     });
     setToStorage(STORAGE_KEYS.INVOICES, invoices);
 
-    // Update consultation status if linked
     const consultations = storageService.getConsultations().map(c => {
       if (c.paymentReference === data.paymentReference || c.invoiceNumber === data.invoiceNumber) {
         return {
@@ -745,7 +1228,6 @@ export const storageService = {
 
     const verifiedPayment = payments.find(p => p.id === paymentId);
     if (verifiedPayment) {
-      // Update invoice
       const invoices = storageService.getInvoices().map(inv => {
         if (inv.invoiceNumber === verifiedPayment.invoiceNumber) {
           return {
@@ -757,7 +1239,6 @@ export const storageService = {
       });
       setToStorage(STORAGE_KEYS.INVOICES, invoices);
 
-      // Update consultation
       const consultations = storageService.getConsultations().map(c => {
         if (c.invoiceNumber === verifiedPayment.invoiceNumber || c.paymentReference === verifiedPayment.paymentReference) {
           return {
@@ -841,7 +1322,6 @@ export const storageService = {
     setToStorage(STORAGE_KEYS.CASES, [newCase, ...cases]);
     logAudit(actor, 'FILE_CASE', 'Case', newCase.id, `Registered case: ${newCase.suitNumber} (${caseId})`);
 
-    // Create case assignment entry
     storageService.createCaseAssignment({
       caseId: newCase.id,
       suitNumber: newCase.suitNumber,
@@ -880,8 +1360,6 @@ export const storageService = {
     };
     setToStorage(STORAGE_KEYS.CASE_ASSIGNMENTS, [newAssignment, ...assignments]);
 
-    // Notify assigned counsel
-    const assignedUser = storageService.getUserById(data.counselId);
     dispatchNotification(
       'New Case Assignment',
       `You have been assigned to case ${data.suitNumber} by ${data.assignedByName}. Please review and accept or provide reasons for declining.`,
@@ -964,7 +1442,6 @@ export const storageService = {
     const newEntry: CourtDiaryEntry = { ...entry, id: `diary-${Date.now()}` };
     setToStorage(STORAGE_KEYS.COURT_DIARY, [newEntry, ...entries]);
 
-    // Also update case next court date
     const cases = storageService.getCases().map(c => {
       if (c.id === entry.caseId) {
         return { ...c, nextCourtDate: entry.courtDate };
@@ -1274,6 +1751,11 @@ export const storageService = {
     setToStorage(STORAGE_KEYS.PUBLIC_NOTICES, list);
     logAudit(actor, 'UPDATE_NOTICE', 'PublicNotice', notice.id, `Updated notice: ${notice.title}`);
   },
+  deletePublicNotice: (noticeId: string, actor: User): void => {
+    const list = storageService.getPublicNotices().filter(n => n.id !== noticeId);
+    setToStorage(STORAGE_KEYS.PUBLIC_NOTICES, list);
+    logAudit(actor, 'DELETE_NOTICE', 'PublicNotice', noticeId, `Deleted notice ${noticeId}`);
+  },
   getPublicEnquiries: (): PublicEnquiry[] => getFromStorage<PublicEnquiry[]>(STORAGE_KEYS.PUBLIC_ENQUIRIES, []),
   submitPublicEnquiry: (enquiry: Omit<PublicEnquiry, 'id' | 'createdAt' | 'status'>): PublicEnquiry => {
     const list = storageService.getPublicEnquiries();
@@ -1349,10 +1831,6 @@ export const storageService = {
   getAuditLogs: (): AuditLog[] => getFromStorage<AuditLog[]>(STORAGE_KEYS.AUDIT_LOGS, []),
 
   // Active Session & Branch
-  getCurrentUserId: (): string => getFromStorage<string>(STORAGE_KEYS.CURRENT_USER_ID, 'usr-principal-01'),
-  setCurrentUserId: (id: string): void => {
-    setToStorage(STORAGE_KEYS.CURRENT_USER_ID, id);
-  },
   getActiveBranchId: (): string => getFromStorage<string>(STORAGE_KEYS.ACTIVE_BRANCH_ID, 'br-abuja-01'),
   setActiveBranchId: (id: string): void => {
     setToStorage(STORAGE_KEYS.ACTIVE_BRANCH_ID, id);

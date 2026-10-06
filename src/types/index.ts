@@ -13,8 +13,16 @@ export type AvailabilityStatus =
   | 'ON_LEAVE'
   | 'OUT_OF_OFFICE';
 
+export type AccountStatus = 
+  | 'Active'
+  | 'Inactive'
+  | 'Suspended'
+  | 'Password Reset Required'
+  | 'Archived';
+
 export interface User {
   id: string;
+  username: string; // e.g. "principal.partner", "head.chamber", "administrator", "accounts", "counsel"
   name: string;
   email: string;
   phone: string;
@@ -27,7 +35,25 @@ export interface User {
   availability: AvailabilityStatus;
   isPubliclyVisible: boolean;
   isActive: boolean;
+  accountStatus: AccountStatus;
+  passwordHash: string;
+  salt: string;
+  requiresPasswordChange: boolean;
+  failedLoginAttempts: number;
+  lastLogin?: string;
+  passwordChangedAt?: string;
+  temporaryResetToken?: string;
+  temporaryResetExpires?: string;
   createdAt: string;
+}
+
+export interface UserSession {
+  userId: string;
+  token: string;
+  role: UserRole;
+  branchId: string;
+  rememberMe: boolean;
+  expiresAt: string;
 }
 
 export interface Branch {
@@ -119,7 +145,7 @@ export interface Matter {
 
 export interface Court {
   id: string;
-  name: string; // e.g. "Federal High Court", "FCT High Court", "Upper Sharia Court"
+  name: string;
   courtType: 'Supreme Court' | 'Court of Appeal' | 'Federal High Court' | 'High Court' | 'Magistrate Court' | 'National Industrial Court' | 'Sharia Court' | 'Customary Court' | 'Other';
   state: string;
   judicialDivision: string;
@@ -130,13 +156,13 @@ export interface Court {
 export interface CaseRecord {
   id: string;
   caseId: string; // BBC-CASE-2026-XXXXXX
-  suitNumber: string; // e.g. FHC/ABJ/CS/412/2026
+  suitNumber: string;
   matterId: string;
   clientId: string;
   courtId: string;
   judicialDivision: string;
   judge?: string;
-  counselId: string; // assigned counsel
+  counselId: string;
   opposingParty: string;
   opposingCounsel?: string;
   caseType: 'Civil' | 'Criminal' | 'Commercial' | 'Property/Tenancy' | 'Constitutional' | 'Sharia/Family';
@@ -172,7 +198,7 @@ export interface CourtDiaryEntry {
   courtName: string;
   counselId: string;
   clientId: string;
-  purpose: string; // e.g. "Mention", "Hearing of Motion", "Cross Examination", "Judgment"
+  purpose: string;
   status: 'Scheduled' | 'Attended' | 'Adjourned' | 'Concluded';
   outcomeSummary?: string;
   nextCourtDate?: string;
@@ -196,7 +222,7 @@ export interface Task {
 
 export interface DocumentRecord {
   id: string;
-  documentId: string; // BBC-DOC-2026-XXXXXX
+  documentId: string;
   title: string;
   category: 
     | 'Client Documents'
@@ -277,7 +303,7 @@ export interface Appointment {
 
 export interface Property {
   id: string;
-  propertyId: string; // BBC-PROP-2026-XXXXXX
+  propertyId: string;
   name: string;
   propertyType: 
     | 'Residential House'
@@ -318,7 +344,7 @@ export interface Landlord {
   email: string;
   address: string;
   bankDetails?: string;
-  trackingCode: string; // BBC-LAND-2026-XXXXXX
+  trackingCode: string;
   dateRegistered: string;
 }
 
@@ -340,7 +366,7 @@ export interface Tenant {
   email: string;
   propertyId: string;
   unitNumber: string;
-  trackingCode: string; // BBC-TEN-2026-XXXXXX
+  trackingCode: string;
   occupation?: string;
   status: 'Prospective' | 'Active' | 'Expiring Soon' | 'Expired' | 'Renewed' | 'Terminated' | 'Vacated' | 'Disputed';
   dateRegistered: string;
@@ -411,7 +437,7 @@ export interface InvoiceItem {
 
 export interface Invoice {
   id: string;
-  invoiceNumber: string; // BBC-INV-2026-XXXXXX
+  invoiceNumber: string;
   clientId?: string;
   clientName: string;
   clientEmail: string;
@@ -426,14 +452,14 @@ export interface Invoice {
   date: string;
   dueDate: string;
   paymentStatus: 'UNPAID' | 'PAYMENT_SUBMITTED' | 'PAYMENT_VERIFIED' | 'CANCELLED';
-  paymentReference: string; // BBC-PAY-2026-XXXXXX
+  paymentReference: string;
   paymentMethod?: string;
   notes?: string;
 }
 
 export interface PaymentRecord {
   id: string;
-  paymentReference: string; // BBC-PAY-2026-XXXXXX
+  paymentReference: string;
   invoiceNumber: string;
   clientName: string;
   amount: number;
@@ -441,7 +467,7 @@ export interface PaymentRecord {
   paymentDate: string;
   status: 'PAYMENT_SUBMITTED' | 'PAYMENT_VERIFIED' | 'REJECTED';
   bankTransactionRef?: string;
-  receiptNumber?: string; // BBC-REC-2026-XXXXXX
+  receiptNumber?: string;
   verifiedById?: string;
   verifiedByName?: string;
   verificationDate?: string;
@@ -466,7 +492,7 @@ export interface ExpenseRecord {
 
 export interface Institution {
   id: string;
-  code: string; // e.g. NLS-BWARI, UNILAG-LAW
+  code: string;
   name: string;
   type: 'Nigerian Law School' | 'University' | 'Faculty of Law' | 'Legal Training Institution' | 'Other Educational Institution';
   address: string;
@@ -480,7 +506,7 @@ export interface Institution {
 
 export interface StudentProfile {
   id: string;
-  studentId: string; // BBC-INT-2026-XXXXXX
+  studentId: string;
   fullName: string;
   gender?: 'Male' | 'Female';
   phone: string;
@@ -488,8 +514,8 @@ export interface StudentProfile {
   institutionId: string;
   institutionName: string;
   faculty: string;
-  programme: string; // e.g. "LL.B Law", "Bar Part II (B.L)", "Diploma in Law"
-  level: string; // e.g. "400 Level", "500 Level", "Bar Vocational"
+  programme: string;
+  level: string;
   matricNumber: string;
   placementType: 'Institution-Referred' | 'Direct Student Application';
   placementStartDate: string;
@@ -536,15 +562,15 @@ export interface InternshipEvaluation {
   evaluationDate: string;
   evaluatorCounselId: string;
   evaluatorCounselName: string;
-  punctualityScore: number; // 1-5
-  professionalConductScore: number; // 1-5
-  legalResearchScore: number; // 1-5
-  draftingScore: number; // 1-5
-  communicationScore: number; // 1-5
-  courtroomObservationScore: number; // 1-5
-  teamworkScore: number; // 1-5
-  confidentialityScore: number; // 1-5
-  generalPerformanceScore: number; // 1-5
+  punctualityScore: number;
+  professionalConductScore: number;
+  legalResearchScore: number;
+  draftingScore: number;
+  communicationScore: number;
+  courtroomObservationScore: number;
+  teamworkScore: number;
+  confidentialityScore: number;
+  generalPerformanceScore: number;
   supervisorComments: string;
   recommendedForCertificate: boolean;
 }
@@ -592,7 +618,7 @@ export interface ApprovalRequest {
 
 export interface NotificationItem {
   id: string;
-  userId?: string; // empty means firm-wide / role-wide
+  userId?: string;
   targetRole?: UserRole;
   title: string;
   message: string;
@@ -612,4 +638,20 @@ export interface AuditLog {
   entity: string;
   entityId: string;
   details: string;
+}
+
+// WEBSITE CONTENT MANAGEMENT (CMS)
+export interface WebsiteContent {
+  tagline: string;
+  heroHeadline: string;
+  heroSubheadline: string;
+  aboutStory: string;
+  aboutFoundingYear: string;
+  officeHoursText: string;
+  emergencyHotline: string;
+  consultationFeeStandard: number;
+  internshipPolicyNotice: string;
+  recoveryOfPremisesNotice: string;
+  lastUpdated: string;
+  updatedBy: string;
 }

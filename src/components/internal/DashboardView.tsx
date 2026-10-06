@@ -171,12 +171,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateSection 
 
   return (
     <div className="space-y-6">
-      {/* Header Banner */}
+      {/* Header Banner - Distinct for each of the 5 Authorized Roles */}
       <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-xs flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <div className="flex items-center space-x-2">
             <span className="text-xs font-bold text-amber-700 uppercase tracking-wider font-mono">
-              ROLE: {currentUser?.role.replace('_', ' ')}
+              {isPrincipalPartner ? '1. PRINCIPAL PARTNER DASHBOARD' :
+               isHeadOfChamber ? '2. HEAD OF CHAMBER DASHBOARD' :
+               isAdminSecretary ? '3. ADMINISTRATOR / SECRETARY DASHBOARD' :
+               isAccountOfficer ? '4. ACCOUNT OFFICER DASHBOARD' :
+               '5. COUNSEL / STAFF DASHBOARD'}
             </span>
             <span className="text-slate-300">·</span>
             <span className="text-xs text-slate-500 font-medium">
@@ -184,10 +188,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateSection 
             </span>
           </div>
           <h1 className="text-2xl font-serif font-bold text-slate-900 mt-1">
-            Welcome, {currentUser?.name}
+            {isPrincipalPartner && 'Principal Partner Executive Dashboard'}
+            {isHeadOfChamber && 'Head of Chamber Operational Dashboard'}
+            {isAdminSecretary && 'Administrator / Secretary Operational Dashboard'}
+            {isAccountOfficer && 'Account Officer Financial & Invoicing Dashboard'}
+            {isCounselStaff && 'Counsel / Staff Litigation Docket Dashboard'}
           </h1>
           <p className="text-xs text-slate-500 mt-0.5">
-            Operational Overview · Live Chambers Database Sync Active
+            {isPrincipalPartner && 'Welcome, Principal Partner. System-Wide Governance · All Branches · Staff Management · Executive Approvals.'}
+            {isHeadOfChamber && `Welcome, Head of Chamber. Managing Branch Operations · Matter Allocation · Cause List · Staff Oversight.`}
+            {isAdminSecretary && 'Welcome, Chambers Administrator. Full Website Content Control · Public Notices · Client Intake · Fixtures Registry.'}
+            {isAccountOfficer && 'Welcome, Account Officer. Client Retainers · Trust Escrow · Consultation Invoices · Payment Verifications.'}
+            {isCounselStaff && `Welcome, ${currentUser?.name}. Assigned Cases & Briefs · Court Diary Fixtures · Task Deadlines · Availability.`}
           </p>
         </div>
 
@@ -197,6 +209,199 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateSection 
               <Scale className="w-4 h-4 text-amber-700" />
               <span>Highest Operational & Global Authority</span>
             </span>
+          )}
+          {isHeadOfChamber && (
+            <span className="text-xs bg-purple-50 text-purple-900 border border-purple-300 px-3 py-1.5 rounded-lg font-semibold flex items-center space-x-1.5">
+              <Briefcase className="w-4 h-4 text-purple-700" />
+              <span>Branch Operational Leadership</span>
+            </span>
+          )}
+          {isAdminSecretary && (
+            <span className="text-xs bg-blue-50 text-blue-900 border border-blue-300 px-3 py-1.5 rounded-lg font-semibold flex items-center space-x-1.5">
+              <FileText className="w-4 h-4 text-blue-700" />
+              <span>Full Website & Intake Authority</span>
+            </span>
+          )}
+          {isAccountOfficer && (
+            <span className="text-xs bg-emerald-50 text-emerald-900 border border-emerald-300 px-3 py-1.5 rounded-lg font-semibold flex items-center space-x-1.5">
+              <CreditCard className="w-4 h-4 text-emerald-700" />
+              <span>Chambers Financial Comptroller</span>
+            </span>
+          )}
+          {isCounselStaff && (
+            <span className="text-xs bg-slate-100 text-slate-800 border border-slate-300 px-3 py-1.5 rounded-lg font-semibold flex items-center space-x-1.5">
+              <Clock className="w-4 h-4 text-amber-600" />
+              <span>Status: {currentUser?.availability.replace('_', ' ')}</span>
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Role-Specific Quick Action Shortcuts */}
+      <div className="bg-slate-900 text-white rounded-xl p-4 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border border-slate-800">
+        <div className="flex items-center space-x-2 text-xs">
+          <span className="font-serif font-bold text-amber-400 uppercase tracking-wider text-[11px]">
+            Role Quick Navigation:
+          </span>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          {isPrincipalPartner && (
+            <>
+              <button 
+                onClick={() => onNavigateSection('users')}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-amber-300 rounded-lg font-semibold transition-colors flex items-center space-x-1"
+              >
+                <Users className="w-3.5 h-3.5" />
+                <span>User Management</span>
+              </button>
+              <button 
+                onClick={() => onNavigateSection('website_content')}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg font-semibold transition-colors flex items-center space-x-1"
+              >
+                <FileText className="w-3.5 h-3.5 text-amber-400" />
+                <span>Website & Content</span>
+              </button>
+              <button 
+                onClick={() => onNavigateSection('matters_cases')}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg font-semibold transition-colors flex items-center space-x-1"
+              >
+                <Briefcase className="w-3.5 h-3.5 text-purple-400" />
+                <span>All Litigation & Matters</span>
+              </button>
+              <button 
+                onClick={() => onNavigateSection('administration')}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg font-semibold transition-colors flex items-center space-x-1"
+              >
+                <Scale className="w-3.5 h-3.5 text-teal-400" />
+                <span>Branches & Audits</span>
+              </button>
+            </>
+          )}
+
+          {isHeadOfChamber && (
+            <>
+              <button 
+                onClick={() => onNavigateSection('users')}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-amber-300 rounded-lg font-semibold transition-colors flex items-center space-x-1"
+              >
+                <Users className="w-3.5 h-3.5" />
+                <span>Staff Management</span>
+              </button>
+              <button 
+                onClick={() => onNavigateSection('website_content')}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg font-semibold transition-colors flex items-center space-x-1"
+              >
+                <FileText className="w-3.5 h-3.5 text-amber-400" />
+                <span>Website & Notices</span>
+              </button>
+              <button 
+                onClick={() => onNavigateSection('matters_cases')}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg font-semibold transition-colors flex items-center space-x-1"
+              >
+                <Briefcase className="w-3.5 h-3.5 text-purple-400" />
+                <span>Assign Matters</span>
+              </button>
+              <button 
+                onClick={() => onNavigateSection('court_diary')}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg font-semibold transition-colors flex items-center space-x-1"
+              >
+                <Calendar className="w-3.5 h-3.5 text-amber-400" />
+                <span>Court Diary</span>
+              </button>
+            </>
+          )}
+
+          {isAdminSecretary && (
+            <>
+              <button 
+                onClick={() => onNavigateSection('website_content')}
+                className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-semibold transition-colors flex items-center space-x-1"
+              >
+                <FileText className="w-3.5 h-3.5" />
+                <span>Website & Content Control</span>
+              </button>
+              <button 
+                onClick={() => onNavigateSection('clients')}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg font-semibold transition-colors flex items-center space-x-1"
+              >
+                <Users className="w-3.5 h-3.5 text-blue-400" />
+                <span>Client Intake</span>
+              </button>
+              <button 
+                onClick={() => onNavigateSection('consultations')}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg font-semibold transition-colors flex items-center space-x-1"
+              >
+                <Clock className="w-3.5 h-3.5 text-amber-400" />
+                <span>Consultations</span>
+              </button>
+              <button 
+                onClick={() => onNavigateSection('court_diary')}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg font-semibold transition-colors flex items-center space-x-1"
+              >
+                <Calendar className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Cause List Registry</span>
+              </button>
+            </>
+          )}
+
+          {isAccountOfficer && (
+            <>
+              <button 
+                onClick={() => onNavigateSection('billing')}
+                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-semibold transition-colors flex items-center space-x-1"
+              >
+                <CreditCard className="w-3.5 h-3.5" />
+                <span>Invoices & Verification</span>
+              </button>
+              <button 
+                onClick={() => onNavigateSection('consultations')}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg font-semibold transition-colors flex items-center space-x-1"
+              >
+                <Clock className="w-3.5 h-3.5 text-amber-400" />
+                <span>Consultation Invoices</span>
+              </button>
+              <button 
+                onClick={() => onNavigateSection('properties')}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg font-semibold transition-colors flex items-center space-x-1"
+              >
+                <Building2 className="w-3.5 h-3.5 text-teal-400" />
+                <span>Property Escrows</span>
+              </button>
+            </>
+          )}
+
+          {isCounselStaff && (
+            <>
+              <button 
+                onClick={() => onNavigateSection('matters_cases')}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-amber-300 rounded-lg font-semibold transition-colors flex items-center space-x-1"
+              >
+                <Briefcase className="w-3.5 h-3.5" />
+                <span>My Cases & Briefs</span>
+              </button>
+              <button 
+                onClick={() => onNavigateSection('court_diary')}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg font-semibold transition-colors flex items-center space-x-1"
+              >
+                <Calendar className="w-3.5 h-3.5 text-amber-400" />
+                <span>Court Diary</span>
+              </button>
+              <button 
+                onClick={() => onNavigateSection('tasks')}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg font-semibold transition-colors flex items-center space-x-1"
+              >
+                <CheckSquare className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Active Tasks</span>
+              </button>
+              <button 
+                onClick={() => onNavigateSection('legal_research')}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg font-semibold transition-colors flex items-center space-x-1"
+              >
+                <Scale className="w-3.5 h-3.5 text-purple-400" />
+                <span>Legal Research</span>
+              </button>
+            </>
           )}
         </div>
       </div>

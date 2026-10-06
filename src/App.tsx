@@ -22,8 +22,13 @@ import { InternshipsView } from './components/internal/InternshipsView';
 import { LegalResearchView } from './components/internal/LegalResearchView';
 import { DocumentsView } from './components/internal/DocumentsView';
 import { AdministrationView } from './components/internal/AdministrationView';
+import { UserManagementView } from './components/internal/UserManagementView';
+import { WebsiteManagementView } from './components/internal/WebsiteManagementView';
+import { LoginPage } from './components/auth/LoginPage';
+import { ChangePasswordModal } from './components/auth/ChangePasswordModal';
 
 function MainApp() {
+  const { isAuthenticated, requiresPasswordChange } = useAuth();
   const [isInternalMode, setIsInternalMode] = useState<boolean>(false);
   const [publicView, setPublicView] = useState<string>('home');
   const [internalSection, setInternalSection] = useState<string>('dashboard');
@@ -45,26 +50,56 @@ function MainApp() {
     setIsInternalMode(true);
   };
 
-  if (isInternalMode) {
+  // If in internal mode but NOT authenticated, present the professional Chambers LoginPage
+  if (isInternalMode && !isAuthenticated) {
     return (
-      <InternalLayout
-        currentSection={internalSection}
-        onNavigateSection={handleNavigateInternal}
-        onOpenPublicSite={() => setIsInternalMode(false)}
-      >
-        {internalSection === 'dashboard' && <DashboardView onNavigateSection={handleNavigateInternal} />}
-        {internalSection === 'clients' && <ClientsView />}
-        {internalSection === 'consultations' && <ConsultationsView />}
-        {internalSection === 'matters_cases' && <MattersAndCasesView />}
-        {internalSection === 'court_diary' && <CourtDiaryView />}
-        {internalSection === 'tasks' && <TasksView />}
-        {internalSection === 'properties' && <PropertiesView />}
-        {internalSection === 'billing' && <BillingView />}
-        {internalSection === 'internships' && <InternshipsView />}
-        {internalSection === 'legal_research' && <LegalResearchView />}
-        {internalSection === 'documents' && <DocumentsView />}
-        {internalSection === 'administration' && <AdministrationView />}
-      </InternalLayout>
+      <LoginPage
+        onSuccessLogin={(needsPasswordChange) => {
+          setIsInternalMode(true);
+          setInternalSection('dashboard');
+        }}
+        onReturnToPublic={() => setIsInternalMode(false)}
+      />
+    );
+  }
+
+  // If authenticated and in internal mode
+  if (isInternalMode && isAuthenticated) {
+    return (
+      <>
+        {/* Enforce First Login Password Change Modal before allowing normal access */}
+        {requiresPasswordChange && (
+          <ChangePasswordModal
+            isOpen={true}
+            onSuccess={() => {
+              // Once changed, continue to dashboard
+              setInternalSection('dashboard');
+            }}
+            canDismiss={false}
+          />
+        )}
+
+        <InternalLayout
+          currentSection={internalSection}
+          onNavigateSection={handleNavigateInternal}
+          onOpenPublicSite={() => setIsInternalMode(false)}
+        >
+          {internalSection === 'dashboard' && <DashboardView onNavigateSection={handleNavigateInternal} />}
+          {internalSection === 'users' && <UserManagementView />}
+          {internalSection === 'website_content' && <WebsiteManagementView />}
+          {internalSection === 'clients' && <ClientsView />}
+          {internalSection === 'consultations' && <ConsultationsView />}
+          {internalSection === 'matters_cases' && <MattersAndCasesView />}
+          {internalSection === 'court_diary' && <CourtDiaryView />}
+          {internalSection === 'tasks' && <TasksView />}
+          {internalSection === 'properties' && <PropertiesView />}
+          {internalSection === 'billing' && <BillingView />}
+          {internalSection === 'internships' && <InternshipsView />}
+          {internalSection === 'legal_research' && <LegalResearchView />}
+          {internalSection === 'documents' && <DocumentsView />}
+          {internalSection === 'administration' && <AdministrationView />}
+        </InternalLayout>
+      </>
     );
   }
 

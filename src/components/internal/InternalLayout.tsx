@@ -22,7 +22,8 @@ import {
   Shield, 
   ExternalLink,
   Clock,
-  Building
+  Building,
+  Globe
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { NotificationMenu } from '../common/NotificationMenu';
@@ -78,6 +79,8 @@ export const InternalLayout: React.FC<InternalLayoutProps> = ({
   // Filter navigation items by role
   const navItems = [
     { id: 'dashboard', label: 'Main Dashboard', icon: LayoutDashboard, roles: ['PRINCIPAL_PARTNER', 'HEAD_OF_CHAMBER', 'ADMINISTRATOR_SECRETARY', 'ACCOUNT_OFFICER', 'COUNSEL_STAFF'] },
+    { id: 'users', label: 'User Management', icon: Shield, roles: ['PRINCIPAL_PARTNER', 'HEAD_OF_CHAMBER'] },
+    { id: 'website_content', label: 'Website & Content Control', icon: Globe, roles: ['PRINCIPAL_PARTNER', 'HEAD_OF_CHAMBER', 'ADMINISTRATOR_SECRETARY'] },
     { id: 'clients', label: 'Client Management', icon: Users, roles: ['PRINCIPAL_PARTNER', 'HEAD_OF_CHAMBER', 'ADMINISTRATOR_SECRETARY', 'COUNSEL_STAFF'] },
     { id: 'consultations', label: 'Consultation & Intake', icon: Clock, roles: ['PRINCIPAL_PARTNER', 'HEAD_OF_CHAMBER', 'ADMINISTRATOR_SECRETARY', 'ACCOUNT_OFFICER'] },
     { id: 'matters_cases', label: 'Matters & Litigation', icon: Briefcase, roles: ['PRINCIPAL_PARTNER', 'HEAD_OF_CHAMBER', 'ADMINISTRATOR_SECRETARY', 'COUNSEL_STAFF'] },
@@ -359,6 +362,14 @@ export const InternalLayout: React.FC<InternalLayoutProps> = ({
             >
               <ExternalLink className="w-4 h-4" />
               <span>Public Chambers Portal</span>
+            </button>
+
+            <button
+              onClick={logout}
+              className="w-full flex items-center space-x-2 px-3 py-2 text-xs text-red-400 hover:text-red-300 hover:bg-red-950/40 border border-red-900/40 rounded-lg transition-colors"
+            >
+              <LogOut className="w-4 h-4 text-red-400" />
+              <span>Sign Out / Lock Portal</span>
             </button>
           </div>
         </aside>
