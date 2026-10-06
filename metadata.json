@@ -1,0 +1,6 @@
+{
+  "name": "B. B. Bale & Co. Chambers — Law Firm Management System",
+  "description": "Secure, organized, and professional law firm management and public client services platform for B. B. Bale & Co. Chambers.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
