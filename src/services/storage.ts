@@ -374,6 +374,10 @@ const INITIAL_WEBSITE_CONTENT: WebsiteContent = {
   consultationFeeStandard: 35000,
   internshipPolicyNotice: 'Chambers welcomes Bar Part II externs from the Nigerian Law School and law undergraduates from recognized universities.',
   recoveryOfPremisesNotice: 'Statutory notice periods must not be mechanically applied; each notice is formulated in accordance with applicable State tenancy legislation and agreements.',
+  invoiceBankName: 'First Bank of Nigeria PLC',
+  invoiceAccountName: 'B. B. BALE & CO. (CLIENT SERVICES)',
+  invoiceAccountNumber: '2039485712',
+  invoicePaymentMethod: 'Bank Transfer',
   lastUpdated: new Date().toISOString(),
   updatedBy: 'Barrister B. B. Bale, SAN'
 };

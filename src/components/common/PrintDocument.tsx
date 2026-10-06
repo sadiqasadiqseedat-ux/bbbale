@@ -10,6 +10,7 @@ import {
   StudentProfile, 
   CourtDiaryEntry 
 } from '../../types';
+import { storageService } from '../../services/storage';
 import { Scale, Printer, Download, X } from 'lucide-react';
 
 export type PrintableDocumentType =
@@ -69,9 +70,10 @@ export const PrintDocumentModal: React.FC<PrintDocumentProps> = ({ document, onC
               </div>
               <div>
                 <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Payment Instructions:</h4>
-                <p className="text-xs text-slate-700">Bank: <span className="font-semibold">First Bank of Nigeria PLC</span></p>
-                <p className="text-xs text-slate-700">Account Name: <span className="font-semibold">B. B. BALE & CO. (CLIENT SERVICES)</span></p>
-                <p className="text-xs text-slate-700">Account Number: <span className="font-mono font-semibold">2039485712</span></p>
+                <p className="text-xs text-slate-700">Bank: <span className="font-semibold">{storageService.getWebsiteContent().invoiceBankName}</span></p>
+                <p className="text-xs text-slate-700">Account Name: <span className="font-semibold">{storageService.getWebsiteContent().invoiceAccountName}</span></p>
+                <p className="text-xs text-slate-700">Account Number: <span className="font-mono font-semibold">{storageService.getWebsiteContent().invoiceAccountNumber}</span></p>
+                <p className="text-xs text-slate-700">Payment Method: <span className="font-semibold">{storageService.getWebsiteContent().invoicePaymentMethod}</span></p>
                 <p className="text-xs font-mono text-amber-900 mt-2 bg-amber-50 p-1.5 border border-amber-200 rounded">
                   Mandatory Payment Reference: <span className="font-bold">{inv.paymentReference}</span>
                 </p>

@@ -667,6 +667,11 @@ export interface WebsiteContent {
   consultationFeeStandard: number;
   internshipPolicyNotice: string;
   recoveryOfPremisesNotice: string;
+  // Invoice / payment settlement details (editable via CMS)
+  invoiceBankName: string;
+  invoiceAccountName: string;
+  invoiceAccountNumber: string;
+  invoicePaymentMethod: string;
   lastUpdated: string;
   updatedBy: string;
 }
