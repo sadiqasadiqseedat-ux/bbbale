@@ -13,7 +13,8 @@ import {
   AlertCircle, 
   Printer, 
   ChevronRight,
-  Lock
+  Lock,
+  Upload
 } from 'lucide-react';
 import { storageService } from '../../services/storage';
 import { PrintDocumentModal, PrintableDocumentType } from '../common/PrintDocument';
@@ -34,6 +35,61 @@ export const TrackingCentrePage: React.FC = () => {
   const [errorMsg, setErrorMsg] = useState('');
   const [hasSearched, setHasSearched] = useState(false);
   const [printDocument, setPrintDocument] = useState<PrintableDocumentType | null>(null);
+
+  // Payment submission form state
+  const [showPaymentForm, setShowPaymentForm] = useState(false);
+  const [paymentForm, setPaymentForm] = useState({
+    bankTransactionRef: '',
+    paymentMethod: 'Bank Transfer' as 'Bank Transfer' | 'Online Payment Gateway' | 'POS' | 'Cash' | 'Other',
+    notes: ''
+  });
+  const [receiptFileName, setReceiptFileName] = useState('');
+  const [receiptDataUrl, setReceiptDataUrl] = useState('');
+  const [paymentSubmitting, setPaymentSubmitting] = useState(false);
+  const [paymentSubmitSuccess, setPaymentSubmitSuccess] = useState(false);
+
+  const handleReceiptUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      alert('Receipt file must be 5MB or smaller.');
+      return;
+    }
+    setReceiptFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = () => {
+      setReceiptDataUrl(reader.result as string);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleSubmitPayment = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!trackedRecord || trackedRecord.type !== 'payment') return;
+    if (!paymentForm.bankTransactionRef.trim()) {
+      alert('Please enter the bank transaction reference number.');
+      return;
+    }
+    setPaymentSubmitting(true);
+    storageService.submitPayment({
+      paymentReference: trackedRecord.data.paymentReference,
+      invoiceNumber: trackedRecord.data.invoiceNumber,
+      clientName: trackedRecord.data.clientName,
+      amount: trackedRecord.data.totalAmount,
+      paymentMethod: paymentForm.paymentMethod,
+      bankTransactionRef: paymentForm.bankTransactionRef.trim(),
+      notes: paymentForm.notes.trim() || undefined,
+      proofDocumentUrl: receiptDataUrl || undefined
+    });
+    setPaymentSubmitting(false);
+    setPaymentSubmitSuccess(true);
+    setShowPaymentForm(false);
+    // Re-search to refresh the tracked record with updated status
+    setTimeout(() => {
+      setPaymentSubmitSuccess(false);
+      handleSearch({ preventDefault: () => {} } as React.FormEvent);
+    }, 2000);
+  };
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -243,7 +299,7 @@ export const TrackingCentrePage: React.FC = () => {
           <span>Internship</span>
         </button>
         <button
-          onClick={() => { setActiveTab('payment'); setTrackedRecord(null); setHasSearched(false); }}
+          onClick={() => { setActiveTab('payment'); setTrackedRecord(null); setHasSearched(false); setShowPaymentForm(false); setPaymentSubmitSuccess(false); }}
           className={`flex-1 min-w-[130px] py-2.5 px-3 text-xs font-semibold rounded-lg transition-colors flex items-center justify-center space-x-1.5 ${
             activeTab === 'payment' ? 'bg-slate-900 text-amber-400 shadow-xs' : 'text-slate-600 hover:bg-slate-100'
           }`}
@@ -624,6 +680,159 @@ export const TrackingCentrePage: React.FC = () => {
                   >
                     View Official Receipt
                   </button>
+                </div>
+              )}
+
+              {/* Payment Submission Section — shown when invoice is UNPAID */}
+              {trackedRecord.data.paymentStatus === 'UNPAID' && !paymentSubmitSuccess && (
+                <div className="border-t border-slate-200 pt-5 space-y-4">
+                  {!showPaymentForm ? (
+                    <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg text-center">
+                      <CreditCard className="w-8 h-8 text-amber-600 mx-auto mb-2" />
+                      <p className="text-sm font-semibold text-slate-900 mb-1">Payment Awaiting Submission</p>
+                      <p className="text-xs text-slate-600 mb-3">
+                        Make your payment to the chambers account using the invoice payment reference, then submit your transaction details and receipt for verification.
+                      </p>
+                      <button
+                        onClick={() => setShowPaymentForm(true)}
+                        className="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-lg flex items-center space-x-1.5 mx-auto transition-colors"
+                      >
+                        <Upload className="w-4 h-4" />
+                        <span>Submit Payment Proof</span>
+                      </button>
+                    </div>
+                  ) : (
+                    <form onSubmit={handleSubmitPayment} className="space-y-4 p-4 bg-slate-50 border border-slate-200 rounded-lg">
+                      <div>
+                        <h4 className="text-sm font-serif font-bold text-slate-900 mb-1">Submit Payment for Verification</h4>
+                        <p className="text-xs text-slate-500">Enter your transaction details and upload the payment receipt.</p>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 mb-1">Invoice Number:</label>
+                          <input
+                            type="text"
+                            value={trackedRecord.data.invoiceNumber}
+                            disabled
+                            className="w-full p-2.5 text-xs border border-slate-200 rounded-lg bg-white font-mono text-slate-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 mb-1">Payment Reference:</label>
+                          <input
+                            type="text"
+                            value={trackedRecord.data.paymentReference}
+                            disabled
+                            className="w-full p-2.5 text-xs border border-slate-200 rounded-lg bg-white font-mono text-slate-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 mb-1">Bank Transaction Ref: *</label>
+                          <input
+                            type="text"
+                            required
+                            value={paymentForm.bankTransactionRef}
+                            onChange={e => setPaymentForm({ ...paymentForm, bankTransactionRef: e.target.value })}
+                            placeholder="e.g. TTT/2026/0001234567"
+                            className="w-full p-2.5 text-xs border border-slate-300 rounded-lg font-mono focus:outline-hidden focus:border-amber-600"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 mb-1">Payment Method: *</label>
+                          <select
+                            required
+                            value={paymentForm.paymentMethod}
+                            onChange={e => setPaymentForm({ ...paymentForm, paymentMethod: e.target.value as any })}
+                            className="w-full p-2.5 text-xs border border-slate-300 rounded-lg focus:outline-hidden focus:border-amber-600"
+                          >
+                            <option value="Bank Transfer">Bank Transfer</option>
+                            <option value="Online Payment Gateway">Online Payment Gateway</option>
+                            <option value="POS">POS</option>
+                            <option value="Cash">Cash</option>
+                            <option value="Other">Other</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">Upload Payment Receipt:</label>
+                        <div className="flex items-center space-x-3">
+                          <label className="flex items-center space-x-2 px-4 py-2.5 bg-white border border-slate-300 rounded-lg cursor-pointer hover:bg-slate-50 text-xs font-semibold text-slate-700 transition-colors">
+                            <Upload className="w-4 h-4" />
+                            <span>{receiptFileName || 'Choose file...'}</span>
+                            <input
+                              type="file"
+                              accept="image/*,.pdf"
+                              onChange={handleReceiptUpload}
+                              className="hidden"
+                            />
+                          </label>
+                          {receiptFileName && (
+                            <span className="text-xs text-emerald-700 font-medium flex items-center space-x-1">
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <span>Receipt attached</span>
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[10px] text-slate-400 mt-1">Accepted: images & PDF. Max 5MB.</p>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">Additional Notes (optional):</label>
+                        <textarea
+                          rows={2}
+                          value={paymentForm.notes}
+                          onChange={e => setPaymentForm({ ...paymentForm, notes: e.target.value })}
+                          placeholder="Any additional payment details or narration..."
+                          className="w-full p-2.5 text-xs border border-slate-300 rounded-lg focus:outline-hidden focus:border-amber-600"
+                        />
+                      </div>
+
+                      <div className="flex justify-end space-x-2 pt-2 border-t border-slate-200">
+                        <button
+                          type="button"
+                          onClick={() => setShowPaymentForm(false)}
+                          className="px-4 py-2 border border-slate-300 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={paymentSubmitting}
+                          className="px-5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold flex items-center space-x-1.5 disabled:opacity-50"
+                        >
+                          <CheckCircle2 className="w-4 h-4" />
+                          <span>{paymentSubmitting ? 'Submitting...' : 'Submit for Verification'}</span>
+                        </button>
+                      </div>
+                    </form>
+                  )}
+                </div>
+              )}
+
+              {/* Payment submitted — pending verification */}
+              {trackedRecord.data.paymentStatus === 'PAYMENT_SUBMITTED' && (
+                <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg flex items-start space-x-3">
+                  <Clock className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-semibold text-amber-900">Payment Submitted — Pending Verification</p>
+                    <p className="text-xs text-amber-800 mt-0.5">
+                      Your payment proof has been received. The Chambers Account Officer will verify your transaction and issue an official receipt once confirmed.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {paymentSubmitSuccess && (
+                <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-lg flex items-start space-x-3">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-semibold text-emerald-900">Payment Submitted Successfully!</p>
+                    <p className="text-xs text-emerald-800 mt-0.5">
+                      Your payment proof has been received and is pending verification by the Account Officer.
+                    </p>
+                  </div>
                 </div>
               )}
             </div>

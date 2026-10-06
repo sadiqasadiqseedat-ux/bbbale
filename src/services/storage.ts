@@ -1249,6 +1249,7 @@ export const storageService = {
     paymentMethod: PaymentRecord['paymentMethod'];
     bankTransactionRef?: string;
     notes?: string;
+    proofDocumentUrl?: string;
   }): PaymentRecord => {
     const payments = storageService.getPayments();
     const invoicesList = storageService.getInvoices();
@@ -1265,6 +1266,7 @@ export const storageService = {
       status: 'PAYMENT_SUBMITTED',
       bankTransactionRef: data.bankTransactionRef,
       verificationNotes: data.notes,
+      proofDocumentUrl: data.proofDocumentUrl,
       submittedAt: new Date().toISOString()
     };
     setToStorage(STORAGE_KEYS.PAYMENTS, [newPayment, ...payments]);
