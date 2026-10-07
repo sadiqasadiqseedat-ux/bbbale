@@ -19,6 +19,7 @@ import {
 import { storageService, subscribeToStore } from '../../services/storage';
 import { useAuth } from '../../context/AuthContext';
 import { Branch, User, PublicNotice, AuditLog, ApprovalRequest } from '../../types';
+import { ConfirmDialog } from '../common/ConfirmDialog';
 
 export const AdministrationView: React.FC = () => {
   const { currentUser, isPrincipalPartner } = useAuth();
@@ -32,6 +33,7 @@ export const AdministrationView: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [branchActionError, setBranchActionError] = useState('');
   const [branchActionSuccess, setBranchActionSuccess] = useState('');
+  const [branchToDelete, setBranchToDelete] = useState<Branch | null>(null);
 
   // New Branch Modal
   const [isAddBranchOpen, setIsAddBranchOpen] = useState(false);
@@ -173,15 +175,17 @@ export const AdministrationView: React.FC = () => {
   const handleDeleteBranch = (b: Branch) => {
     if (!currentUser) return;
     setBranchActionError('');
+    setBranchToDelete(b);
+  };
 
-    if (window.confirm(`Are you sure you want to permanently delete branch "${b.name}" (${b.code})? This executive action is reserved for the Principal Partner.`)) {
-      const res = storageService.deleteBranch(b.id, currentUser);
-      if (res.success) {
-        setBranchActionSuccess(`Branch "${b.name}" deleted.`);
-        setTimeout(() => setBranchActionSuccess(''), 3000);
-      } else {
-        setBranchActionError(res.error || 'Failed to delete branch.');
-      }
+  const confirmDeleteBranch = (b: Branch) => {
+    if (!currentUser) return;
+    const res = storageService.deleteBranch(b.id, currentUser);
+    if (res.success) {
+      setBranchActionSuccess(`Branch "${b.name}" deleted.`);
+      setTimeout(() => setBranchActionSuccess(''), 3000);
+    } else {
+      setBranchActionError(res.error || 'Failed to delete branch.');
     }
   };
 
@@ -866,6 +870,22 @@ export const AdministrationView: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Confirm Branch Deletion Dialog */}
+      <ConfirmDialog
+        isOpen={!!branchToDelete}
+        title="Delete Branch Location"
+        message={`Are you sure you want to permanently delete branch "${branchToDelete?.name}" (${branchToDelete?.code})? This executive action is reserved for the Principal Partner.`}
+        confirmText="Permanently Delete"
+        cancelText="Keep Branch"
+        variant="danger"
+        onConfirm={() => {
+          if (branchToDelete) {
+            confirmDeleteBranch(branchToDelete);
+          }
+        }}
+        onClose={() => setBranchToDelete(null)}
+      />
     </div>
   );
 };

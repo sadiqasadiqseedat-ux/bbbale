@@ -26,6 +26,7 @@ import {
 import { storageService, subscribeToStore } from '../../services/storage';
 import { useAuth } from '../../context/AuthContext';
 import { PublicNotice, WebsiteContent, User, AvailabilityStatus } from '../../types';
+import { ConfirmDialog } from '../common/ConfirmDialog';
 
 export const WebsiteManagementView: React.FC = () => {
   const { currentUser, isPrincipalPartner, isHeadOfChamber, isAdminSecretary } = useAuth();
@@ -37,6 +38,7 @@ export const WebsiteManagementView: React.FC = () => {
   const [noticeSearch, setNoticeSearch] = useState('');
   const [isAddNoticeOpen, setIsAddNoticeOpen] = useState(false);
   const [editingNotice, setEditingNotice] = useState<PublicNotice | null>(null);
+  const [noticeIdToDelete, setNoticeIdToDelete] = useState<string | null>(null);
   const [noticeForm, setNoticeForm] = useState({
     title: '',
     category: 'Public announcements' as PublicNotice['category'],
@@ -129,11 +131,14 @@ export const WebsiteManagementView: React.FC = () => {
 
   const handleDeleteNotice = (id: string) => {
     if (!currentUser) return;
-    if (window.confirm('Are you sure you want to remove this public notice?')) {
-      storageService.deletePublicNotice(id, currentUser);
-      setSuccessMessage('Notice removed.');
-      setTimeout(() => setSuccessMessage(''), 3000);
-    }
+    setNoticeIdToDelete(id);
+  };
+
+  const confirmDeleteNotice = (id: string) => {
+    if (!currentUser) return;
+    storageService.deletePublicNotice(id, currentUser);
+    setSuccessMessage('Notice removed.');
+    setTimeout(() => setSuccessMessage(''), 3000);
   };
 
   // CMS Handlers
@@ -818,6 +823,22 @@ export const WebsiteManagementView: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Confirm Notice Removal Dialog */}
+      <ConfirmDialog
+        isOpen={!!noticeIdToDelete}
+        title="Remove Public Notice"
+        message="Are you sure you want to remove this public notice from the Chambers website and client portal?"
+        confirmText="Remove Notice"
+        cancelText="Keep Notice"
+        variant="danger"
+        onConfirm={() => {
+          if (noticeIdToDelete) {
+            confirmDeleteNotice(noticeIdToDelete);
+          }
+        }}
+        onClose={() => setNoticeIdToDelete(null)}
+      />
     </div>
   );
 };
