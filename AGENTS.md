@@ -35,6 +35,20 @@ The app is served on **port 3000** by the Vite dev server (live reload enabled).
   cannot hot-swap it cleanly ("useAuth must be used within an AuthProvider" appears transiently). A full
   preview reload resolves it; it is a dev-only HMR quirk, not an app bug.
 
+## Clearing demo data (production D1)
+`scripts/clear-demo-data.sql` deletes the operational/demo rows from the production D1 database `bbbale`
+(clients, matters, cases, billing, property, internships, audit logs, id counters…) while keeping the
+configuration the app needs: `users`, `branches`, `courts`, `partner_institutions`, `public_notices`,
+`website_content`, `roles`, `permissions`, `d1_sync_meta`. Child rows are deleted before their parents so
+foreign keys stay satisfied, and every statement is a no-op if the table is already empty (safe to re-run).
+
+```bash
+npx wrangler d1 execute bbbale --remote --file=./scripts/clear-demo-data.sql
+```
+
+The sandbox has no Cloudflare credentials, so this is run by a user with `wrangler login`. Use
+`--local` instead of `--remote` to apply it to the local dev database.
+
 ## Health Check
 The app is healthy when `http://localhost:3000/` returns HTTP 200.
 
