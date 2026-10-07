@@ -50,9 +50,9 @@ import {
 const INITIAL_USERS: User[] = [
   {
     id: 'usr-principal-01',
-    username: 'admin',
+    username: 'principal.partner',
     name: 'Barrister B. B. Bale, SAN, FCIArb',
-    email: 'admin@bbbalechambers.ng',
+    email: 'principal@bbbalechambers.ng',
     phone: '+234 803 200 1100',
     role: 'PRINCIPAL_PARTNER',
     branchId: 'br-abuja-01',
@@ -545,8 +545,9 @@ export async function initializeStorage(): Promise<void> {
       const parsedUsers: User[] = JSON.parse(existingUsers);
       let updated = false;
       for (const u of parsedUsers) {
-        if (u.id === 'usr-principal-01' && u.username !== 'admin') {
-          u.username = 'admin';
+        if (u.id === 'usr-principal-01') {
+          u.username = 'principal.partner';
+          u.email = 'principal@bbbalechambers.ng';
           updated = true;
         }
         if (u.requiresPasswordChange) {
@@ -605,13 +606,31 @@ export const storageService = {
   },
   getUserByUsernameOrEmail: (identifier: string): User | undefined => {
     const clean = identifier.trim().toLowerCase();
-    if (clean === 'admin' || clean === 'administrator') {
-      const adminUser = storageService.getUsers().find(u => u.username.toLowerCase() === 'admin' || u.role === 'PRINCIPAL_PARTNER') || storageService.getUsers()[0];
-      if (adminUser) return adminUser;
-    }
-    return storageService.getUsers().find(
+
+    // Direct match by username or email
+    const directMatch = storageService.getUsers().find(
       u => u.username.toLowerCase() === clean || u.email.toLowerCase() === clean
     );
+    if (directMatch) return directMatch;
+
+    // Role name aliases
+    if (['principal.partner', 'principal_partner', 'principal-partner', 'principal', 'admin'].includes(clean)) {
+      return storageService.getUsers().find(u => u.role === 'PRINCIPAL_PARTNER');
+    }
+    if (['head.chamber', 'head_of_chamber', 'head.of.chamber', 'head_chamber', 'head'].includes(clean)) {
+      return storageService.getUsers().find(u => u.role === 'HEAD_OF_CHAMBER');
+    }
+    if (['administrator', 'administrator_secretary', 'admin_secretary', 'secretary'].includes(clean)) {
+      return storageService.getUsers().find(u => u.role === 'ADMINISTRATOR_SECRETARY');
+    }
+    if (['accounts', 'account_officer', 'account'].includes(clean)) {
+      return storageService.getUsers().find(u => u.role === 'ACCOUNT_OFFICER');
+    }
+    if (['counsel', 'counsel_staff', 'counsel.staff'].includes(clean)) {
+      return storageService.getUsers().find(u => u.role === 'COUNSEL_STAFF');
+    }
+
+    return undefined;
   },
 
   // Authentication & Session (active session expires after 24 hours of inactivity)

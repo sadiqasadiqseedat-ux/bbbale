@@ -119,7 +119,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onSuccessLogin, onReturnTo
                   autoComplete="username"
                   value={identifier}
                   onChange={e => setIdentifier(e.target.value)}
-                  placeholder="Enter username (e.g. admin)"
+                  placeholder="Enter role username (e.g. principal.partner)"
                   className="w-full pl-9 pr-3 py-2.5 rounded-lg border border-slate-300 text-slate-900 text-xs sm:text-sm focus:outline-hidden focus:border-amber-600 focus:ring-1 focus:ring-amber-600 transition-colors"
                 />
               </div>
