@@ -22,6 +22,7 @@ import { InternshipsView } from './components/internal/InternshipsView';
 import { LegalResearchView } from './components/internal/LegalResearchView';
 import { DocumentsView } from './components/internal/DocumentsView';
 import { AdministrationView } from './components/internal/AdministrationView';
+import { CloudflareD1Manager } from './components/internal/CloudflareD1Manager';
 import { UserManagementView } from './components/internal/UserManagementView';
 import { WebsiteManagementView } from './components/internal/WebsiteManagementView';
 import { LoginPage } from './components/auth/LoginPage';
@@ -98,6 +99,7 @@ function MainApp() {
           {internalSection === 'legal_research' && <LegalResearchView />}
           {internalSection === 'documents' && <DocumentsView />}
           {internalSection === 'administration' && <AdministrationView />}
+          {internalSection === 'cloudflare_d1' && <CloudflareD1Manager />}
         </InternalLayout>
       </>
     );
