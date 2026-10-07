@@ -238,7 +238,19 @@ export async function seedD1InitialData(db: any): Promise<boolean> {
 
     const defaultPassword = 'admin@2026';
 
-    // 1. Seed initial 5 personnel
+    try {
+      await db.exec?.('PRAGMA foreign_keys = OFF;');
+    } catch {}
+
+    // 1. Seed initial branches FIRST (required by users foreign key branch_id)
+    for (const b of INITIAL_BRANCHES_SEEDS) {
+      await db.prepare(`
+        INSERT OR IGNORE INTO branches (id, name, code, address, city, state, phone, email, head_of_chamber_id, is_active)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).bind(b.id, b.name, b.code, b.address, b.city, b.state, b.phone, b.email, b.head_of_chamber_id, b.is_active).run();
+    }
+
+    // 2. Seed initial 5 personnel
     for (const u of INITIAL_STAFF_SEEDS) {
       const hash = await hashPassword(defaultPassword, u.salt);
       await db.prepare(`
@@ -253,14 +265,6 @@ export async function seedD1InitialData(db: any): Promise<boolean> {
         u.practice_areas, u.bio, u.photo_url, u.availability, u.is_publicly_visible,
         u.is_active, u.account_status, hash, u.salt
       ).run();
-    }
-
-    // 2. Seed initial branches
-    for (const b of INITIAL_BRANCHES_SEEDS) {
-      await db.prepare(`
-        INSERT OR IGNORE INTO branches (id, name, code, address, city, state, phone, email, head_of_chamber_id, is_active)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).bind(b.id, b.name, b.code, b.address, b.city, b.state, b.phone, b.email, b.head_of_chamber_id, b.is_active).run();
     }
 
     // 3. Seed courts

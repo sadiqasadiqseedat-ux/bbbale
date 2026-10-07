@@ -16,6 +16,7 @@ export function createDevD1Database(dbFilePath: string = './.base44/chambers_d1_
     }
 
     const sqlite = new DatabaseSync(dbFilePath);
+    sqlite.exec('PRAGMA foreign_keys = OFF;');
 
     // Apply schema immediately if needed
     const schemaFile = path.resolve(process.cwd(), 'migrations/0001_initial_schema.sql');
