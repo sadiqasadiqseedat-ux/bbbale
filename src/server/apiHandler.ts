@@ -350,7 +350,7 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
     // GET /api/d1/status — Cloudflare D1 real-time health and row count verification
     if (path === '/api/d1/status' && method === 'GET') {
       try {
-        const tableCheck = await db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all();
+        const tableCheck = await db.prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%'").all();
         const tables = (tableCheck.results || []).map((t: any) => t.name);
 
         const counts: Record<string, number> = {};
@@ -1054,7 +1054,24 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
         UPDATE invoices SET payment_status = ? WHERE invoice_number = ?
       `).bind(invoiceStatus, payment.invoice_number).run();
 
-      // 3. Update Linked Consultation
+      // 3. Insert or update Receipt in receipts table
+      if (isApproved && receiptNumber) {
+        try {
+          await db.prepare(`
+            INSERT OR REPLACE INTO receipts (
+              id, receipt_number, payment_reference, invoice_number, client_name,
+              amount, payment_method, issued_date, issued_by_id, issued_by_name, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, date('now'), ?, ?, datetime('now'))
+          `).bind(
+            `rec-${Date.now()}`, receiptNumber, payment.payment_reference, payment.invoice_number,
+            payment.client_name, payment.amount, payment.payment_method, actor.id, actor.name
+          ).run();
+        } catch (recErr) {
+          console.warn('Failed recording receipt in receipts table:', recErr);
+        }
+      }
+
+      // 4. Update Linked Consultation
       if (isApproved) {
         await db.prepare(`
           UPDATE consultations

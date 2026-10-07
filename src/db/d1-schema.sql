@@ -644,6 +644,183 @@ CREATE TABLE IF NOT EXISTS appointments (
   notes TEXT
 );
 
+-- 36. Roles & Role Definitions
+CREATE TABLE IF NOT EXISTS roles (
+  id TEXT PRIMARY KEY,
+  role_key TEXT NOT NULL UNIQUE,
+  display_name TEXT NOT NULL,
+  description TEXT NOT NULL,
+  permissions TEXT NOT NULL DEFAULT '[]', -- JSON array of permission keys
+  is_system_role INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- 37. System Permissions
+CREATE TABLE IF NOT EXISTS permissions (
+  id TEXT PRIMARY KEY,
+  code TEXT NOT NULL UNIQUE,
+  module TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  description TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- 38. General Public & Client Applications
+CREATE TABLE IF NOT EXISTS applications (
+  id TEXT PRIMARY KEY,
+  application_number TEXT NOT NULL UNIQUE,
+  applicant_name TEXT NOT NULL,
+  applicant_email TEXT NOT NULL,
+  applicant_phone TEXT NOT NULL,
+  application_type TEXT NOT NULL, -- Consultation, Retainer, Internship, Tenancy
+  branch_id TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'Submitted',
+  details TEXT NOT NULL,
+  reviewed_by_id TEXT,
+  reviewed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (branch_id) REFERENCES branches(id)
+);
+
+-- 39. Litigation & Statutory Deadlines
+CREATE TABLE IF NOT EXISTS deadlines (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  deadline_date TEXT NOT NULL,
+  matter_id TEXT,
+  case_id TEXT,
+  assigned_to_id TEXT NOT NULL,
+  priority TEXT NOT NULL DEFAULT 'High',
+  status TEXT NOT NULL DEFAULT 'Pending',
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (assigned_to_id) REFERENCES users(id)
+);
+
+-- 40. Property Matters & Tenancy Litigation
+CREATE TABLE IF NOT EXISTS property_matters (
+  id TEXT PRIMARY KEY,
+  property_id TEXT NOT NULL,
+  matter_id TEXT,
+  landlord_id TEXT NOT NULL,
+  dispute_type TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'Active',
+  lead_counsel_id TEXT NOT NULL,
+  court_suit_number TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (property_id) REFERENCES properties(id),
+  FOREIGN KEY (landlord_id) REFERENCES landlords(id),
+  FOREIGN KEY (lead_counsel_id) REFERENCES users(id)
+);
+
+-- 41. Property Escrow & Financial Transactions
+CREATE TABLE IF NOT EXISTS property_transactions (
+  id TEXT PRIMARY KEY,
+  transaction_ref TEXT NOT NULL UNIQUE,
+  property_id TEXT NOT NULL,
+  unit_number TEXT,
+  party_name TEXT NOT NULL,
+  transaction_type TEXT NOT NULL, -- Rent Deposit, Escrow, Service Charge, Caution Fee
+  amount REAL NOT NULL,
+  date TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'COMPLETED',
+  recorded_by_id TEXT NOT NULL,
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (property_id) REFERENCES properties(id)
+);
+
+-- 42. Verified Receipts Registry
+CREATE TABLE IF NOT EXISTS receipts (
+  id TEXT PRIMARY KEY,
+  receipt_number TEXT NOT NULL UNIQUE,
+  payment_reference TEXT NOT NULL,
+  invoice_number TEXT NOT NULL,
+  client_name TEXT NOT NULL,
+  amount REAL NOT NULL,
+  payment_method TEXT NOT NULL,
+  issued_date TEXT NOT NULL,
+  issued_by_id TEXT NOT NULL,
+  issued_by_name TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (payment_reference) REFERENCES payments(payment_reference)
+);
+
+-- 43. Internship Applications
+CREATE TABLE IF NOT EXISTS internship_applications (
+  id TEXT PRIMARY KEY,
+  application_code TEXT NOT NULL UNIQUE,
+  full_name TEXT NOT NULL,
+  email TEXT NOT NULL,
+  phone TEXT NOT NULL,
+  institution_name TEXT NOT NULL,
+  level TEXT NOT NULL,
+  placement_type TEXT NOT NULL,
+  preferred_branch_id TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'Application Received',
+  supporting_documents TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (preferred_branch_id) REFERENCES branches(id)
+);
+
+-- 44. Internship Placements & Counsel Assignments
+CREATE TABLE IF NOT EXISTS internship_placements (
+  id TEXT PRIMARY KEY,
+  student_id TEXT NOT NULL,
+  branch_id TEXT NOT NULL,
+  supervising_counsel_id TEXT NOT NULL,
+  start_date TEXT NOT NULL,
+  end_date TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'Active',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (student_id) REFERENCES students(id),
+  FOREIGN KEY (branch_id) REFERENCES branches(id),
+  FOREIGN KEY (supervising_counsel_id) REFERENCES users(id)
+);
+
+-- 45. Universal Public Tracking Portal Entries
+CREATE TABLE IF NOT EXISTS public_tracking (
+  id TEXT PRIMARY KEY,
+  tracking_code TEXT NOT NULL UNIQUE,
+  entity_type TEXT NOT NULL, -- Consultation, Internship, Quit Notice, Invoice
+  entity_id TEXT NOT NULL,
+  public_title TEXT NOT NULL,
+  status TEXT NOT NULL,
+  client_visible_summary TEXT NOT NULL,
+  last_updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- 46. Real-Time Counsel Availability Tracker
+CREATE TABLE IF NOT EXISTS counsel_availability (
+  id TEXT PRIMARY KEY,
+  counsel_id TEXT NOT NULL UNIQUE,
+  status TEXT NOT NULL DEFAULT 'AVAILABLE', -- AVAILABLE, IN_COURT, IN_OFFICE, IN_MEETING, ON_LEAVE
+  current_location TEXT,
+  return_expected_at TEXT,
+  notes TEXT,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (counsel_id) REFERENCES users(id)
+);
+
+-- 47. Views for exact table aliases requested by standard CRUD modules
+CREATE VIEW IF NOT EXISTS counsel AS 
+  SELECT * FROM users WHERE role IN ('PRINCIPAL_PARTNER', 'HEAD_OF_CHAMBER', 'COUNSEL_STAFF');
+
+CREATE VIEW IF NOT EXISTS court_dates AS 
+  SELECT * FROM court_diary;
+
+CREATE VIEW IF NOT EXISTS rent AS 
+  SELECT * FROM rent_records;
+
+CREATE VIEW IF NOT EXISTS internship_students AS 
+  SELECT * FROM students;
+
+CREATE VIEW IF NOT EXISTS internship_institutions AS 
+  SELECT * FROM partner_institutions;
+
+CREATE VIEW IF NOT EXISTS notices AS 
+  SELECT * FROM public_notices;
+
 -- ==============================================================================
 -- INDEXES FOR FAST QUERYING & PERFORMANCE
 -- ==============================================================================

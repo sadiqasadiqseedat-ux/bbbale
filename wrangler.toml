@@ -6,7 +6,7 @@ pages_build_output_dir = "dist"
 # env.DB is the server-side binding to Cloudflare D1
 [[d1_databases]]
 binding = "DB"
-database_name = "bbbale-db"
-database_id = "00000000-0000-0000-0000-000000000000"
+database_name = "bbbale"
+database_id = "60c1e783-fa57-48b3-9b37-8d0041a4e80a"
 migrations_dir = "migrations"
 

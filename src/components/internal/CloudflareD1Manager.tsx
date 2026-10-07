@@ -95,8 +95,8 @@ export const CloudflareD1Manager: React.FC = () => {
     const wranglerSnippet = `# wrangler.toml D1 Binding
 [[d1_databases]]
 binding = "DB"
-database_name = "bbbale-db"
-database_id = "YOUR_CLOUDFLARE_D1_DATABASE_ID"
+database_name = "bbbale"
+database_id = "60c1e783-fa57-48b3-9b37-8d0041a4e80a"
 migrations_dir = "migrations"`;
     navigator.clipboard.writeText(wranglerSnippet);
     setCopiedWrangler(true);
@@ -249,8 +249,8 @@ migrations_dir = "migrations"`;
             <p className="text-slate-400">
               1. Open the <strong>Cloudflare Dashboard</strong> → <strong>Workers & Pages</strong> → <strong>D1 SQL Database</strong>.<br />
               2. Click <strong>Create Database</strong>.<br />
-              3. Set database name to: <code className="bg-slate-900 px-1 py-0.5 rounded text-amber-300 font-mono">bbbale-db</code>.<br />
-              4. Copy the generated <strong>Database ID</strong> (UUID format).
+              3. Set database name to: <code className="bg-slate-900 px-1 py-0.5 rounded text-amber-300 font-mono">bbbale</code>.<br />
+              4. Copy the generated <strong>Database ID</strong> (<code className="bg-slate-900 px-1 py-0.5 rounded text-emerald-300 font-mono">60c1e783-fa57-48b3-9b37-8d0041a4e80a</code>).
             </p>
           </div>
 
@@ -261,7 +261,7 @@ migrations_dir = "migrations"`;
             <p className="text-slate-400">
               1. In Cloudflare Pages project settings: <strong>Settings</strong> → <strong>Functions</strong> → <strong>D1 Database Bindings</strong>.<br />
               2. Variable Name: <code className="bg-slate-900 px-1 py-0.5 rounded text-amber-300 font-mono">DB</code>.<br />
-              3. Select your D1 database: <code className="bg-slate-900 px-1 py-0.5 rounded text-amber-300 font-mono">bbbale-db</code>.<br />
+              3. Select your D1 database: <code className="bg-slate-900 px-1 py-0.5 rounded text-amber-300 font-mono">bbbale</code>.<br />
               4. Re-deploy. Cloudflare automatically injects <code className="text-amber-300">env.DB</code> into <code className="text-amber-300">functions/api/[[route]].ts</code>!
             </p>
           </div>
