@@ -105,7 +105,7 @@ const INITIAL_USERS: User[] = [
     bio: 'Oversees chambers intake, court fixture registries, appointment schedules, website content, and student placement logistics.',
     photoUrl: 'https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&q=80&w=600',
     availability: 'AVAILABLE',
-    isPubliclyVisible: false,
+    isPubliclyVisible: true,
     isActive: true,
     accountStatus: 'Active',
     salt: 'c3d4e5f60718293a',
@@ -127,7 +127,7 @@ const INITIAL_USERS: User[] = [
     bio: 'Chartered Accountant overseeing client retainer accounting, consultation invoice verification, court filing disbursements, and property escrow records.',
     photoUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=600',
     availability: 'AVAILABLE',
-    isPubliclyVisible: false,
+    isPubliclyVisible: true,
     isActive: true,
     accountStatus: 'Active',
     salt: 'd4e5f60718293a4b',
@@ -550,6 +550,10 @@ export async function initializeStorage(): Promise<void> {
           u.email = 'principal@bbbalechambers.ng';
           updated = true;
         }
+        if (u.isPubliclyVisible === undefined || u.isPubliclyVisible === false) {
+          u.isPubliclyVisible = true;
+          updated = true;
+        }
         if (u.requiresPasswordChange) {
           u.passwordHash = await hashPassword(defaultSetupPassword, u.salt);
           updated = true;
@@ -557,6 +561,7 @@ export async function initializeStorage(): Promise<void> {
       }
       if (updated) {
         localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(parsedUsers));
+        notifySubscribers();
       }
     } catch (e) {
       console.error('Failed to parse existing users', e);
@@ -1084,7 +1089,7 @@ export const storageService = {
   updateCounselAvailability: (userId: string, availability: User['availability'], actor: User): void => {
     const users = storageService.getUsers().map(u => {
       if (u.id === userId) {
-        return { ...u, availability };
+        return { ...u, availability, isPubliclyVisible: true };
       }
       return u;
     });
@@ -1178,7 +1183,7 @@ export const storageService = {
     const code = getNextNumber('consultation', 'CONS');
     const invoiceNumber = getNextNumber('invoice', 'INV');
     const paymentRef = getNextNumber('payment', 'PAY');
-    const fee = data.feeAmount || 35000;
+    const fee = data.feeAmount || storageService.getWebsiteContent()?.consultationFeeStandard || 35000;
 
     const newConsultation: Consultation = {
       id: `cons-${Date.now()}`,

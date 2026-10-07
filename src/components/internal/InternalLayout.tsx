@@ -55,6 +55,7 @@ export const InternalLayout: React.FC<InternalLayoutProps> = ({
     isAdminSecretary,
     isAccountOfficer,
     isCounselStaff,
+    updateAvailability,
     logout
   } = useAuth();
 
@@ -98,7 +99,7 @@ export const InternalLayout: React.FC<InternalLayoutProps> = ({
 
   const handleAvailabilityChange = (status: AvailabilityStatus) => {
     if (currentUser) {
-      storageService.updateCounselAvailability(currentUser.id, status, currentUser);
+      updateAvailability(status);
       setAvailabilityDropdownOpen(false);
     }
   };
@@ -185,11 +186,11 @@ export const InternalLayout: React.FC<InternalLayoutProps> = ({
               {/* View Public Website */}
               <button
                 onClick={onOpenPublicSite}
-                className="hidden xl:flex items-center space-x-1 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white rounded-lg text-xs border border-slate-800 transition-colors"
+                className="flex items-center space-x-1 px-2.5 sm:px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white rounded-lg text-xs border border-slate-800 transition-colors shadow-xs"
                 title="Return to Public Chambers Website"
               >
                 <ExternalLink className="w-3.5 h-3.5 text-amber-500" />
-                <span>Public Website</span>
+                <span className="hidden sm:inline">Public Website</span>
               </button>
 
               {/* Authenticated Role Badge - Strictly fixed to authenticated account, no switching allowed */}

@@ -146,13 +146,48 @@ export const CounselPage: React.FC = () => {
   const renderBadge = (status: User['availability']) => {
     switch (status) {
       case 'IN_COURT':
-        return <span className="text-[11px] font-bold px-2.5 py-0.5 bg-amber-100 text-amber-900 border border-amber-300 rounded-full">IN COURT</span>;
+        return (
+          <span className="inline-flex items-center space-x-1.5 text-[11px] font-bold px-2.5 py-0.5 bg-amber-50 text-amber-800 border border-amber-300 rounded-full shadow-2xs">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse shrink-0"></span>
+            <span>IN COURT</span>
+          </span>
+        );
       case 'IN_OFFICE':
-        return <span className="text-[11px] font-bold px-2.5 py-0.5 bg-blue-100 text-blue-900 border border-blue-300 rounded-full">IN OFFICE</span>;
+        return (
+          <span className="inline-flex items-center space-x-1.5 text-[11px] font-bold px-2.5 py-0.5 bg-blue-50 text-blue-800 border border-blue-300 rounded-full shadow-2xs">
+            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse shrink-0"></span>
+            <span>IN OFFICE</span>
+          </span>
+        );
       case 'AVAILABLE':
-        return <span className="text-[11px] font-bold px-2.5 py-0.5 bg-emerald-100 text-emerald-900 border border-emerald-300 rounded-full">AVAILABLE FOR APPOINTMENT</span>;
+        return (
+          <span className="inline-flex items-center space-x-1.5 text-[11px] font-bold px-2.5 py-0.5 bg-emerald-50 text-emerald-800 border border-emerald-300 rounded-full shadow-2xs">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0"></span>
+            <span>AVAILABLE FOR APPOINTMENT</span>
+          </span>
+        );
+      case 'BUSY':
+        return (
+          <span className="inline-flex items-center space-x-1.5 text-[11px] font-bold px-2.5 py-0.5 bg-rose-50 text-rose-800 border border-rose-300 rounded-full shadow-2xs">
+            <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse shrink-0"></span>
+            <span>BUSY / IN CONFERENCE</span>
+          </span>
+        );
+      case 'ON_LEAVE':
+        return (
+          <span className="inline-flex items-center space-x-1.5 text-[11px] font-bold px-2.5 py-0.5 bg-purple-50 text-purple-800 border border-purple-300 rounded-full shadow-2xs">
+            <span className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse shrink-0"></span>
+            <span>ON LEAVE</span>
+          </span>
+        );
+      case 'OUT_OF_OFFICE':
       default:
-        return <span className="text-[11px] font-semibold px-2.5 py-0.5 bg-slate-100 text-slate-700 border border-slate-300 rounded-full">OUT OF OFFICE</span>;
+        return (
+          <span className="inline-flex items-center space-x-1.5 text-[11px] font-medium px-2.5 py-0.5 bg-slate-100 text-slate-700 border border-slate-300 rounded-full shadow-2xs">
+            <span className="w-1.5 h-1.5 rounded-full bg-slate-400 shrink-0"></span>
+            <span>OUT OF OFFICE</span>
+          </span>
+        );
     }
   };
 
@@ -186,7 +221,7 @@ export const CounselPage: React.FC = () => {
             filterAvailability === 'IN_COURT' ? 'bg-amber-600 text-white' : 'bg-white border text-slate-700 hover:bg-slate-50'
           }`}
         >
-          Counsel In Court
+          In Court
         </button>
         <button
           onClick={() => setFilterAvailability('IN_OFFICE')}
@@ -194,7 +229,7 @@ export const CounselPage: React.FC = () => {
             filterAvailability === 'IN_OFFICE' ? 'bg-blue-600 text-white' : 'bg-white border text-slate-700 hover:bg-slate-50'
           }`}
         >
-          Counsel In Office
+          In Office
         </button>
         <button
           onClick={() => setFilterAvailability('AVAILABLE')}
@@ -203,6 +238,22 @@ export const CounselPage: React.FC = () => {
           }`}
         >
           Available for Appointment
+        </button>
+        <button
+          onClick={() => setFilterAvailability('BUSY')}
+          className={`px-4 py-2 text-xs font-bold rounded-lg transition-colors ${
+            filterAvailability === 'BUSY' ? 'bg-rose-600 text-white' : 'bg-white border text-slate-700 hover:bg-slate-50'
+          }`}
+        >
+          Busy / Conference
+        </button>
+        <button
+          onClick={() => setFilterAvailability('ON_LEAVE')}
+          className={`px-4 py-2 text-xs font-bold rounded-lg transition-colors ${
+            filterAvailability === 'ON_LEAVE' ? 'bg-purple-600 text-white' : 'bg-white border text-slate-700 hover:bg-slate-50'
+          }`}
+        >
+          On Leave
         </button>
         <button
           onClick={() => setFilterAvailability('OUT_OF_OFFICE')}

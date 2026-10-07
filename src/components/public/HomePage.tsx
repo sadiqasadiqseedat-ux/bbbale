@@ -16,7 +16,7 @@ import {
   ExternalLink
 } from 'lucide-react';
 import { storageService, subscribeToStore } from '../../services/storage';
-import { User, PublicNotice, Branch } from '../../types';
+import { User, PublicNotice, Branch, WebsiteContent } from '../../types';
 
 interface HomePageProps {
   onNavigate: (view: string) => void;
@@ -26,6 +26,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
   const [counselList, setCounselList] = useState<User[]>([]);
   const [notices, setNotices] = useState<PublicNotice[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
+  const [cmsContent, setCmsContent] = useState<WebsiteContent>(storageService.getWebsiteContent());
   const [stats, setStats] = useState({
     activeBranches: 4,
     mattersHandled: 0,
@@ -41,6 +42,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
     setNotices(pubNotices);
     const brList = storageService.getBranches().filter(b => b.isActive);
     setBranches(brList);
+    setCmsContent(storageService.getWebsiteContent());
 
     const matters = storageService.getMatters();
     const cases = storageService.getCases();
@@ -65,13 +67,48 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
   const getStatusBadge = (status: User['availability']) => {
     switch (status) {
       case 'IN_COURT':
-        return <span className="inline-flex items-center text-[11px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-0.5 rounded-full">IN COURT</span>;
+        return (
+          <span className="inline-flex items-center space-x-1.5 text-[11px] font-bold text-amber-800 bg-amber-50 border border-amber-300 px-2.5 py-0.5 rounded-full shadow-2xs">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse shrink-0"></span>
+            <span>IN COURT</span>
+          </span>
+        );
       case 'IN_OFFICE':
-        return <span className="inline-flex items-center text-[11px] font-bold text-blue-700 bg-blue-50 border border-blue-200 px-2.5 py-0.5 rounded-full">IN OFFICE</span>;
+        return (
+          <span className="inline-flex items-center space-x-1.5 text-[11px] font-bold text-blue-800 bg-blue-50 border border-blue-300 px-2.5 py-0.5 rounded-full shadow-2xs">
+            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse shrink-0"></span>
+            <span>IN OFFICE</span>
+          </span>
+        );
       case 'AVAILABLE':
-        return <span className="inline-flex items-center text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full">AVAILABLE FOR APPOINTMENT</span>;
+        return (
+          <span className="inline-flex items-center space-x-1.5 text-[11px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-300 px-2.5 py-0.5 rounded-full shadow-2xs">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0"></span>
+            <span>AVAILABLE FOR APPOINTMENT</span>
+          </span>
+        );
+      case 'BUSY':
+        return (
+          <span className="inline-flex items-center space-x-1.5 text-[11px] font-bold text-rose-800 bg-rose-50 border border-rose-300 px-2.5 py-0.5 rounded-full shadow-2xs">
+            <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse shrink-0"></span>
+            <span>BUSY / IN CONFERENCE</span>
+          </span>
+        );
+      case 'ON_LEAVE':
+        return (
+          <span className="inline-flex items-center space-x-1.5 text-[11px] font-bold text-purple-800 bg-purple-50 border border-purple-300 px-2.5 py-0.5 rounded-full shadow-2xs">
+            <span className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse shrink-0"></span>
+            <span>ON LEAVE</span>
+          </span>
+        );
+      case 'OUT_OF_OFFICE':
       default:
-        return <span className="inline-flex items-center text-[11px] font-medium text-slate-600 bg-slate-100 border border-slate-200 px-2.5 py-0.5 rounded-full">OUT OF OFFICE</span>;
+        return (
+          <span className="inline-flex items-center space-x-1.5 text-[11px] font-medium text-slate-700 bg-slate-100 border border-slate-300 px-2.5 py-0.5 rounded-full shadow-2xs">
+            <span className="w-1.5 h-1.5 rounded-full bg-slate-400 shrink-0"></span>
+            <span>OUT OF OFFICE</span>
+          </span>
+        );
     }
   };
 
@@ -84,15 +121,15 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
           <div className="max-w-3xl space-y-6">
             <div className="inline-flex items-center space-x-2 px-3 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-semibold tracking-wide uppercase">
               <Scale className="w-3.5 h-3.5" />
-              <span>B. B. BALE & CO. CHAMBERS · NIGERIAN LEGAL PRACTICE</span>
+              <span>{cmsContent?.tagline || 'B. B. BALE & CO. CHAMBERS · NIGERIAN LEGAL PRACTICE'}</span>
             </div>
 
             <h1 className="text-4xl sm:text-5xl lg:text-6xl font-serif font-bold tracking-tight text-white leading-tight">
-              Secure. Organized. Professional.
+              {cmsContent?.heroHeadline || 'Secure. Organized. Professional.'}
             </h1>
 
             <p className="text-base sm:text-lg text-slate-300 font-light leading-relaxed">
-              Distinguished legal representation, trial advocacy, property & recovery of premises management, Islamic law jurisprudence, and institutional law-student mentorship across Nigeria.
+              {cmsContent?.heroSubheadline || 'Distinguished legal representation, trial advocacy, property & recovery of premises management, Islamic law jurisprudence, and institutional law-student mentorship across Nigeria.'}
             </p>
 
             <div className="pt-4 flex flex-wrap gap-4">

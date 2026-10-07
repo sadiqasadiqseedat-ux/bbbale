@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Scale, Phone, Mail, MapPin, Shield, Menu, X, ArrowRight, ExternalLink, Clock, Search } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { storageService, subscribeToStore } from '../../services/storage';
+import { WebsiteContent } from '../../types';
 
 interface PublicLayoutProps {
   currentView: string;
@@ -16,7 +18,15 @@ export const PublicLayout: React.FC<PublicLayoutProps> = ({
   children
 }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [cmsContent, setCmsContent] = useState<WebsiteContent>(storageService.getWebsiteContent());
   const { currentUser } = useAuth();
+
+  useEffect(() => {
+    const updateCms = () => setCmsContent(storageService.getWebsiteContent());
+    updateCms();
+    const unsub = subscribeToStore(updateCms);
+    return () => unsub();
+  }, []);
 
   const navLinks = [
     { id: 'home', label: 'Home' },
@@ -52,14 +62,14 @@ export const PublicLayout: React.FC<PublicLayoutProps> = ({
             <span className="hidden md:inline text-slate-400">Barristers, Solicitors & Legal Practitioners</span>
           </div>
           <div className="flex items-center space-x-4 text-[11px]">
-            <a href="tel:+2348032001100" className="flex items-center space-x-1 hover:text-amber-400 transition-colors">
+            <a href={`tel:${cmsContent?.emergencyHotline || '+2348032001100'}`} className="flex items-center space-x-1 hover:text-amber-400 transition-colors">
               <Phone className="w-3 h-3 text-amber-500" />
-              <span>+234 803 200 1100</span>
+              <span>{cmsContent?.emergencyHotline || '+234 803 200 1100'}</span>
             </a>
             <span className="text-slate-600">·</span>
             <span className="flex items-center space-x-1 text-slate-400">
               <Clock className="w-3 h-3 text-slate-400" />
-              <span>Mon - Fri: 8:00 AM - 5:30 PM</span>
+              <span>{cmsContent?.officeHoursText || 'Mon - Fri: 8:00 AM - 5:30 PM'}</span>
             </span>
             <span className="text-slate-600">·</span>
             <button
@@ -226,7 +236,7 @@ export const PublicLayout: React.FC<PublicLayoutProps> = ({
                 Premier Nigerian law firm providing comprehensive litigation, commercial advocacy, property management, and Islamic jurisprudence services with unwavering integrity.
               </p>
               <p className="text-xs text-amber-400 font-serif italic">
-                "Secure. Organized. Professional."
+                "{cmsContent?.tagline || 'Secure. Organized. Professional.'}"
               </p>
             </div>
 
@@ -296,7 +306,7 @@ export const PublicLayout: React.FC<PublicLayoutProps> = ({
                 </div>
                 <div className="flex items-center space-x-2">
                   <Phone className="w-4 h-4 text-amber-500 shrink-0" />
-                  <span>+234 9 291 8000 / +234 803 200 1100</span>
+                  <span>{cmsContent?.emergencyHotline || '+234 9 291 8000 / +234 803 200 1100'}</span>
                 </div>
                 <div className="flex items-center space-x-2">
                   <Mail className="w-4 h-4 text-amber-500 shrink-0" />

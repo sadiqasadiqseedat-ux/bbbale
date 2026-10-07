@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Bell, Calendar, User, Tag, Clock, MapPin, Phone, Mail, Send, CheckCircle2 } from 'lucide-react';
 import { storageService, subscribeToStore } from '../../services/storage';
-import { PublicNotice, Branch } from '../../types';
+import { PublicNotice, Branch, WebsiteContent } from '../../types';
 
 export const NoticeBoardPage: React.FC = () => {
   const [notices, setNotices] = useState<PublicNotice[]>([]);
@@ -153,6 +153,7 @@ export const BranchesPage: React.FC = () => {
 };
 
 export const ContactPage: React.FC = () => {
+  const [cmsContent, setCmsContent] = useState<WebsiteContent>(storageService.getWebsiteContent());
   const [formData, setFormData] = useState({
     fullName: '',
     email: '',
@@ -162,6 +163,13 @@ export const ContactPage: React.FC = () => {
     branchId: 'br-abuja-01'
   });
   const [submitted, setSubmitted] = useState(false);
+
+  useEffect(() => {
+    const updateCms = () => setCmsContent(storageService.getWebsiteContent());
+    updateCms();
+    const unsub = subscribeToStore(updateCms);
+    return () => unsub();
+  }, []);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -205,7 +213,7 @@ export const ContactPage: React.FC = () => {
               </div>
               <div className="flex items-center space-x-3">
                 <Phone className="w-4 h-4 text-amber-400 shrink-0" />
-                <span>+234 9 291 8000 / +234 803 200 1100</span>
+                <span>{cmsContent?.emergencyHotline || '+234 9 291 8000 / +234 803 200 1100'}</span>
               </div>
               <div className="flex items-center space-x-3">
                 <Mail className="w-4 h-4 text-amber-400 shrink-0" />
@@ -213,7 +221,7 @@ export const ContactPage: React.FC = () => {
               </div>
               <div className="flex items-center space-x-3">
                 <Clock className="w-4 h-4 text-amber-400 shrink-0" />
-                <span>Mondays - Fridays: 8:00 AM - 5:30 PM (Court Recess Excluded)</span>
+                <span>{cmsContent?.officeHoursText || 'Mondays - Fridays: 8:00 AM - 5:30 PM (Court Recess Excluded)'}</span>
               </div>
             </div>
           </div>

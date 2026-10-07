@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   FileText, 
   Calendar, 
@@ -14,8 +14,8 @@ import {
   Building, 
   AlertCircle 
 } from 'lucide-react';
-import { storageService } from '../../services/storage';
-import { Consultation, Invoice } from '../../types';
+import { storageService, subscribeToStore } from '../../services/storage';
+import { Consultation, Invoice, WebsiteContent } from '../../types';
 import { PrintDocumentModal } from '../common/PrintDocument';
 
 const PRACTICE_CATEGORIES = [
@@ -35,6 +35,15 @@ interface BookConsultationPageProps {
 }
 
 export const BookConsultationPage: React.FC<BookConsultationPageProps> = ({ onNavigateToTracking }) => {
+  const [cmsContent, setCmsContent] = useState<WebsiteContent>(storageService.getWebsiteContent());
+
+  useEffect(() => {
+    const updateCms = () => setCmsContent(storageService.getWebsiteContent());
+    updateCms();
+    const unsub = subscribeToStore(updateCms);
+    return () => unsub();
+  }, []);
+
   const [formData, setFormData] = useState({
     fullName: '',
     phone: '',
@@ -87,7 +96,7 @@ export const BookConsultationPage: React.FC<BookConsultationPageProps> = ({ onNa
         briefEnquiry: formData.briefEnquiry,
         supportingDocuments: uploadedFiles,
         branchId: formData.branchId,
-        feeAmount: 35000 // Standard Chambers consultation fee
+        feeAmount: cmsContent?.consultationFeeStandard || 35000 // Reflects standard fee set in dashboard CMS
       });
 
       setCompletedData(result);
@@ -506,7 +515,7 @@ export const BookConsultationPage: React.FC<BookConsultationPageProps> = ({ onNa
 
           <div className="pt-4 border-t border-slate-200 flex items-center justify-between">
             <div className="text-xs text-slate-500">
-              Initial Consultation Retainer: <strong className="text-slate-900">₦35,000.00</strong>
+              Initial Consultation Retainer: <strong className="text-slate-900 font-mono">₦{(cmsContent?.consultationFeeStandard || 35000).toLocaleString('en-NG', { minimumFractionDigits: 2 })}</strong>
             </div>
             <button
               type="submit"

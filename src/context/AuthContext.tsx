@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { User, Branch, UserRole, UserSession } from '../types';
+import { User, Branch, UserRole, UserSession, AvailabilityStatus } from '../types';
 import { storageService, subscribeToStore, initializeStorage, logAudit } from '../services/storage';
 
 interface AuthContextType {
@@ -15,6 +15,7 @@ interface AuthContextType {
   logout: () => void;
   switchAccount: (userId: string) => void;
   switchRole: (role: UserRole) => void;
+  updateAvailability: (status: AvailabilityStatus) => void;
   changePassword: (currentPassword: string, newPassword: string) => Promise<{ success: boolean; error?: string }>;
   requestPasswordReset: (identifier: string) => { success: boolean; message: string; resetToken?: string };
   completePasswordReset: (token: string, newPassword: string) => Promise<{ success: boolean; error?: string }>;
@@ -174,6 +175,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const updateAvailability = (status: AvailabilityStatus) => {
+    if (!currentUser) return;
+    storageService.updateCounselAvailability(currentUser.id, status, currentUser);
+    setCurrentUser(prev => prev ? { ...prev, availability: status } : null);
+  };
+
   const changePassword = async (currentPassword: string, newPassword: string) => {
     if (!currentUser) return { success: false, error: 'No active session' };
     const res = await storageService.changePassword(currentUser.id, currentPassword, newPassword);
@@ -241,6 +248,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         logout,
         switchAccount,
         switchRole,
+        updateAvailability,
         changePassword,
         requestPasswordReset,
         completePasswordReset,

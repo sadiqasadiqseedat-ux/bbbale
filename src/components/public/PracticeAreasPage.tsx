@@ -1,7 +1,18 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Scale, ShieldCheck, Award, BookOpen, CheckCircle2, Building, Gavel } from 'lucide-react';
+import { storageService, subscribeToStore } from '../../services/storage';
+import { WebsiteContent } from '../../types';
 
 export const AboutPage: React.FC = () => {
+  const [cmsContent, setCmsContent] = useState<WebsiteContent>(storageService.getWebsiteContent());
+
+  useEffect(() => {
+    const update = () => setCmsContent(storageService.getWebsiteContent());
+    update();
+    const unsub = subscribeToStore(update);
+    return () => unsub();
+  }, []);
+
   return (
     <div className="max-w-7xl mx-auto px-4 py-16 sm:px-6 lg:px-8 space-y-16">
       <div className="text-center max-w-3xl mx-auto space-y-3">
@@ -12,7 +23,7 @@ export const AboutPage: React.FC = () => {
           About B. B. Bale & Co. Chambers
         </h1>
         <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
-          Founded on principles of unwavering integrity, procedural mastery, and dedicated advocacy under the Legal Practitioners Act of the Federal Republic of Nigeria.
+          Founded in {cmsContent?.aboutFoundingYear || '1996'} on principles of unwavering integrity, procedural mastery, and dedicated advocacy under the Legal Practitioners Act of the Federal Republic of Nigeria.
         </p>
       </div>
 
@@ -21,15 +32,15 @@ export const AboutPage: React.FC = () => {
           <h2 className="text-2xl font-serif font-bold text-slate-900">
             A Legacy of Appellate Rigor & Substantive Justice
           </h2>
-          <p>
-            B. B. BALE & CO. CHAMBERS was established to provide distinguished corporate entities, institutions, and individuals with uncompromising legal defense and advisory services. From our principal chambers in the Federal Capital Territory, Abuja, our footprint extends across commercial hubs in Lagos, Kano, and Port Harcourt.
+          <p className="whitespace-pre-line">
+            {cmsContent?.aboutStory || 'B. B. BALE & CO. CHAMBERS was established to provide distinguished corporate entities, institutions, and individuals with uncompromising legal defense and advisory services. From our principal chambers in the Federal Capital Territory, Abuja, our footprint extends across commercial hubs in Lagos, Kano, and Port Harcourt.'}
           </p>
           <p>
             Our trial and appellate practice is built on comprehensive statutory analysis, painstaking factual investigation, and respectful yet incisive courtroom advocacy. We maintain an exhaustive law library spanning classic common law authorities, Nigerian Supreme Court decisions, and authentic Islamic jurisprudence.
           </p>
           <div className="p-4 bg-amber-50 border-l-4 border-amber-600 rounded-r-lg">
             <p className="font-serif italic text-amber-950 text-sm">
-              "We regard the law not merely as a profession, but as a sacred trust committed to the protection of right, the enforcement of covenant, and the restraint of injustice."
+              "{cmsContent?.tagline || 'We regard the law not merely as a profession, but as a sacred trust committed to the protection of right, the enforcement of covenant, and the restraint of injustice.'}"
             </p>
             <p className="text-xs font-bold text-amber-800 mt-2">— Barrister B. B. Bale, SAN</p>
           </div>

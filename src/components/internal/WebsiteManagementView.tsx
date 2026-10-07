@@ -152,11 +152,17 @@ export const WebsiteManagementView: React.FC = () => {
       ...u,
       isPubliclyVisible: !u.isPubliclyVisible
     }, currentUser);
+    setUsers(storageService.getUsers());
+    setSuccessMessage(`✓ Visibility updated: ${u.name} is now ${!u.isPubliclyVisible ? 'published on the public website' : 'hidden from public view'}.`);
+    setTimeout(() => setSuccessMessage(''), 3500);
   };
 
   const handleUpdateAvailability = (u: User, status: AvailabilityStatus) => {
     if (!currentUser) return;
     storageService.updateCounselAvailability(u.id, status, currentUser);
+    setUsers(storageService.getUsers());
+    setSuccessMessage(`✓ Real-time status updated: ${u.name} is now set to "${status.replace(/_/g, ' ')}" (Reflected Live on Public Site).`);
+    setTimeout(() => setSuccessMessage(''), 3500);
   };
 
   // Add Template

@@ -25,7 +25,9 @@ import {
   CourtDiaryEntry, 
   Task, 
   Invoice, 
-  AuditLog 
+  AuditLog,
+  AvailabilityStatus,
+  User
 } from '../../types';
 
 interface DashboardViewProps {
@@ -41,7 +43,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateSection 
     isAccountOfficer, 
     isCounselStaff,
     activeBranchId,
-    isAllBranches
+    isAllBranches,
+    updateAvailability
   } = useAuth();
 
   const [metrics, setMetrics] = useState({
@@ -65,6 +68,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateSection 
   const [counselAssignments, setCounselAssignments] = useState<CaseAssignment[]>([]);
   const [upcomingCourtDates, setUpcomingCourtDates] = useState<CourtDiaryEntry[]>([]);
   const [recentAudits, setRecentAudits] = useState<AuditLog[]>([]);
+  const [allStaff, setAllStaff] = useState<User[]>([]);
+  const [selectedStaffId, setSelectedStaffId] = useState<string>('');
+  const [statusFeedback, setStatusFeedback] = useState<string>('');
 
   // Modals for assignment rejection
   const [rejectingAssignmentId, setRejectingAssignmentId] = useState<string | null>(null);
@@ -116,6 +122,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateSection 
 
     const expiringCount = tenancies.filter(t => t.status === 'Expiring Soon').length;
     const pendingPayCount = payments.filter(p => p.status === 'PAYMENT_SUBMITTED').length;
+    const activeStaff = storageService.getUsers().filter(u => u.isActive);
+    setAllStaff(activeStaff);
+    if (!selectedStaffId && currentUser) {
+      setSelectedStaffId(currentUser.id);
+    }
 
     setMetrics({
       clientsCount: clients.length,
@@ -236,6 +247,171 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateSection 
           )}
         </div>
       </div>
+
+      {/* Live Real-Time Availability Switcher (Reflecting to Public Website) */}
+      {(() => {
+        const targetStaff = allStaff.find(u => u.id === selectedStaffId) || currentUser;
+        const handleSetAvailability = (st: AvailabilityStatus) => {
+          if (!targetStaff || !currentUser) return;
+          storageService.updateCounselAvailability(targetStaff.id, st, currentUser);
+          if (targetStaff.id === currentUser.id) {
+            updateAvailability(st);
+          }
+          const refreshed = storageService.getUsers().filter(u => u.isActive);
+          setAllStaff(refreshed);
+          setStatusFeedback(`✓ Successfully updated ${targetStaff.name} to "${st.replace('_', ' ')}". Reflecting live on the public website!`);
+          setTimeout(() => setStatusFeedback(''), 4000);
+        };
+
+        return (
+          <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs space-y-4">
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 pb-3 border-b border-slate-100">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-lg bg-amber-50 border border-amber-200/80 flex items-center justify-center text-amber-700 shrink-0 shadow-xs">
+                  <Clock className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center space-x-2">
+                    <h3 className="font-serif font-bold text-sm sm:text-base text-slate-900">
+                      Counsel Real-Time Availability Control
+                    </h3>
+                    <span className="text-[10px] text-emerald-800 bg-emerald-100 border border-emerald-300 px-2 py-0.5 rounded-full font-bold flex items-center space-x-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse"></span>
+                      <span>Reflecting Live to Public Website</span>
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Select any Chambers lawyer or yourself to update immediate court fixture or office engagement status shown on the public directory.
+                  </p>
+                </div>
+              </div>
+
+              {/* Personnel Selector Dropdown */}
+              <div className="flex items-center space-x-2 w-full md:w-auto">
+                <label className="text-xs font-semibold text-slate-600 whitespace-nowrap">
+                  Selected Personnel:
+                </label>
+                <select
+                  value={selectedStaffId || currentUser?.id || ''}
+                  onChange={e => setSelectedStaffId(e.target.value)}
+                  className="text-xs bg-slate-50 border border-slate-300 rounded-lg p-2 font-medium text-slate-900 focus:outline-hidden focus:border-amber-600 cursor-pointer w-full md:w-auto"
+                >
+                  {allStaff.map(u => (
+                    <option key={u.id} value={u.id}>
+                      {u.name} ({u.role.replace(/_/g, ' ')}) — [{u.availability.replace(/_/g, ' ')}]
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {statusFeedback && (
+              <div className="p-3 bg-emerald-50 border border-emerald-300 rounded-lg text-emerald-900 text-xs font-semibold flex items-center space-x-2 animate-in fade-in duration-200">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>{statusFeedback}</span>
+              </div>
+            )}
+
+            {targetStaff && (
+              <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 pt-1">
+                <div className="flex items-center space-x-3.5">
+                  <img
+                    src={targetStaff.photoUrl}
+                    alt={targetStaff.name}
+                    className="w-12 h-12 rounded-lg object-cover border border-slate-200 shadow-2xs shrink-0"
+                  />
+                  <div>
+                    <h4 className="font-serif font-bold text-sm text-slate-950">
+                      {targetStaff.name}
+                    </h4>
+                    <p className="text-xs text-amber-800 font-medium">
+                      {targetStaff.title} · <span className="font-mono text-slate-500">{targetStaff.role.replace(/_/g, ' ')}</span>
+                    </p>
+                    <div className="mt-1 flex items-center space-x-2">
+                      <span className="text-[11px] text-slate-500">
+                        Current Status: <strong className="text-slate-800 font-mono font-bold uppercase">{targetStaff.availability.replace(/_/g, ' ')}</strong>
+                      </span>
+                      <span className="text-[10px] bg-emerald-50 text-emerald-800 border border-emerald-200 px-1.5 py-0.2 rounded font-semibold">
+                        Published on Public Site
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5 w-full lg:w-auto">
+                  {(['AVAILABLE', 'IN_COURT', 'IN_OFFICE', 'BUSY', 'ON_LEAVE', 'OUT_OF_OFFICE'] as AvailabilityStatus[]).map(st => {
+                    const isActive = targetStaff.availability === st;
+                    return (
+                      <button
+                        key={st}
+                        onClick={() => handleSetAvailability(st)}
+                        className={`px-3 py-2 text-xs font-bold rounded-lg border transition-all flex items-center space-x-1.5 ${
+                          isActive
+                            ? st === 'AVAILABLE' ? 'bg-emerald-600 text-white border-emerald-700 shadow-xs ring-2 ring-emerald-400/30'
+                            : st === 'IN_COURT' ? 'bg-amber-600 text-white border-amber-700 shadow-xs ring-2 ring-amber-400/30'
+                            : st === 'IN_OFFICE' ? 'bg-blue-600 text-white border-blue-700 shadow-xs ring-2 ring-blue-400/30'
+                            : st === 'BUSY' ? 'bg-rose-600 text-white border-rose-700 shadow-xs ring-2 ring-rose-400/30'
+                            : st === 'ON_LEAVE' ? 'bg-purple-600 text-white border-purple-700 shadow-xs ring-2 ring-purple-400/30'
+                            : 'bg-slate-700 text-white border-slate-800 shadow-xs'
+                            : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100 hover:border-slate-300'
+                        }`}
+                      >
+                        {isActive && <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse"></span>}
+                        <span>
+                          {st === 'AVAILABLE' ? 'Available'
+                            : st === 'IN_COURT' ? 'In Court'
+                            : st === 'IN_OFFICE' ? 'In Office'
+                            : st === 'BUSY' ? 'Busy / Conference'
+                            : st === 'ON_LEAVE' ? 'On Leave'
+                            : 'Out of Office'}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Quick Counsel Overview Bar */}
+            <div className="pt-3 border-t border-slate-100">
+              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-2">
+                All Chambers Counsel Live Availability Board:
+              </span>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                {allStaff.filter(u => u.isPubliclyVisible).map(staff => (
+                  <div
+                    key={staff.id}
+                    onClick={() => setSelectedStaffId(staff.id)}
+                    className={`p-2.5 rounded-lg border flex items-center justify-between cursor-pointer transition-colors ${
+                      selectedStaffId === staff.id
+                        ? 'border-amber-500 bg-amber-50/50'
+                        : 'border-slate-200 bg-slate-50 hover:bg-slate-100'
+                    }`}
+                  >
+                    <div className="flex items-center space-x-2 min-w-0">
+                      <img src={staff.photoUrl} alt={staff.name} className="w-7 h-7 rounded-full object-cover shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-slate-900 truncate">{staff.name}</p>
+                        <p className="text-[10px] text-slate-500 truncate">{staff.title}</p>
+                      </div>
+                    </div>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap ml-2 ${
+                      staff.availability === 'AVAILABLE' ? 'bg-emerald-100 text-emerald-800' :
+                      staff.availability === 'IN_COURT' ? 'bg-amber-100 text-amber-900 font-bold' :
+                      staff.availability === 'IN_OFFICE' ? 'bg-blue-100 text-blue-800' :
+                      staff.availability === 'BUSY' ? 'bg-rose-100 text-rose-800' :
+                      staff.availability === 'ON_LEAVE' ? 'bg-purple-100 text-purple-800' :
+                      'bg-slate-200 text-slate-700'
+                    }`}>
+                      {staff.availability.replace(/_/g, ' ')}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Role-Specific Quick Action Shortcuts */}
       <div className="bg-slate-900 text-white rounded-xl p-4 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border border-slate-800">
