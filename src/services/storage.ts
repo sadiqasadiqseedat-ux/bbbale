@@ -1449,6 +1449,7 @@ export const storageService = {
   createCaseAssignment: (data: {
     caseId: string;
     suitNumber: string;
+    branchId?: string;
     counselId: string;
     assignedById: string;
     assignedByName: string;
@@ -1458,6 +1459,7 @@ export const storageService = {
       id: `asgn-${Date.now()}`,
       caseId: data.caseId,
       suitNumber: data.suitNumber,
+      branchId: data.branchId,
       counselId: data.counselId,
       assignedById: data.assignedById,
       assignedByName: data.assignedByName,
