@@ -23,8 +23,10 @@ docker compose -f docker-compose.base44.yml up -d
 The app is served on **port 3000** by the Vite dev server (live reload enabled).
 
 ## Key Details
-- **No lockfile**: `npm install --legacy-peer-deps` is required due to an esbuild peer dependency conflict
-  (package.json pins `esbuild@^0.25.0` but Vite 8 wants `^0.27.0`).
+- **Peer dependency conflict**: the project pins `esbuild@^0.25.0` (devDependency) but Vite 8 requires
+  `esbuild@^0.27.0 || ^0.28.0`, so a plain resolve fails with ERESOLVE. A committed root **`.npmrc`** sets
+  `legacy-peer-deps=true`, which fixes it everywhere — in particular the `npm ci` that Cloudflare Pages runs
+  automatically when `package-lock.json` is present (without it the Cloudflare build fails with `EUSAGE`).
 - **No external secrets needed**: `@google/genai` and `express` are listed as dependencies but are not
   imported anywhere in `src/`.
 - **Vite allowed hosts**: handled via `__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS` env var passed in compose.
