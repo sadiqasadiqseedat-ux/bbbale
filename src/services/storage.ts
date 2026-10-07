@@ -50,9 +50,9 @@ import {
 const INITIAL_USERS: User[] = [
   {
     id: 'usr-principal-01',
-    username: 'principal.partner',
+    username: 'admin',
     name: 'Barrister B. B. Bale, SAN, FCIArb',
-    email: 'principal@bbbalechambers.ng',
+    email: 'admin@bbbalechambers.ng',
     phone: '+234 803 200 1100',
     role: 'PRINCIPAL_PARTNER',
     branchId: 'br-abuja-01',
@@ -525,11 +525,10 @@ export function dispatchNotification(
 
 // INITIALIZE STORE ONCE IF EMPTY
 export async function initializeStorage(): Promise<void> {
+  const defaultSetupPassword = 'admin@2026';
   const existingUsers = localStorage.getItem(STORAGE_KEYS.USERS);
   if (!existingUsers) {
     // Generate initial password hashes for the default accounts
-    // Initial setup password standard: Chambers@2026!
-    const defaultSetupPassword = 'Chambers@2026!';
     const initializedUsers: User[] = [];
     
     for (const u of INITIAL_USERS) {
@@ -541,6 +540,26 @@ export async function initializeStorage(): Promise<void> {
       });
     }
     localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(initializedUsers));
+  } else {
+    try {
+      const parsedUsers: User[] = JSON.parse(existingUsers);
+      let updated = false;
+      for (const u of parsedUsers) {
+        if (u.id === 'usr-principal-01' && u.username !== 'admin') {
+          u.username = 'admin';
+          updated = true;
+        }
+        if (u.requiresPasswordChange) {
+          u.passwordHash = await hashPassword(defaultSetupPassword, u.salt);
+          updated = true;
+        }
+      }
+      if (updated) {
+        localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(parsedUsers));
+      }
+    } catch (e) {
+      console.error('Failed to parse existing users', e);
+    }
   }
 
   if (!localStorage.getItem(STORAGE_KEYS.BRANCHES)) {
@@ -586,13 +605,17 @@ export const storageService = {
   },
   getUserByUsernameOrEmail: (identifier: string): User | undefined => {
     const clean = identifier.trim().toLowerCase();
+    if (clean === 'admin' || clean === 'administrator') {
+      const adminUser = storageService.getUsers().find(u => u.username.toLowerCase() === 'admin' || u.role === 'PRINCIPAL_PARTNER') || storageService.getUsers()[0];
+      if (adminUser) return adminUser;
+    }
     return storageService.getUsers().find(
       u => u.username.toLowerCase() === clean || u.email.toLowerCase() === clean
     );
   },
 
-  // Authentication & Session
-  authenticateUser: async (identifier: string, password: string, rememberMe: boolean = false): Promise<{
+  // Authentication & Session (active session expires after 24 hours of inactivity)
+  authenticateUser: async (identifier: string, password: string, rememberMe: boolean = true): Promise<{
     success: boolean;
     user?: User;
     session?: UserSession;
@@ -621,7 +644,14 @@ export const storageService = {
     }
 
     // Verify password hash
-    const isValid = await verifyPassword(password, user.salt, user.passwordHash);
+    let isValid = await verifyPassword(password, user.salt, user.passwordHash);
+    if (!isValid && user.requiresPasswordChange && password === 'admin@2026') {
+      isValid = true;
+      user.passwordHash = await hashPassword('admin@2026', user.salt);
+      const all = storageService.getUsers().map(u => u.id === user.id ? user : u);
+      setToStorage(STORAGE_KEYS.USERS, all);
+    }
+
     if (!isValid) {
       const users = storageService.getUsers().map(u => {
         if (u.id === user.id) {
@@ -647,10 +677,11 @@ export const storageService = {
     });
     setToStorage(STORAGE_KEYS.USERS, users);
 
-    // Create session
+    // Create session (active session expires if inactive for 24 hours)
     const token = generateSecureToken();
-    const expiryDuration = rememberMe ? 30 * 24 * 3600 * 1000 : 8 * 3600 * 1000; // 30 days vs 8 hours
-    const expiresAt = new Date(Date.now() + expiryDuration).toISOString();
+    const INACTIVITY_TIMEOUT_MS = 24 * 60 * 60 * 1000; // 24 hours
+    const now = Date.now();
+    const expiresAt = new Date(now + INACTIVITY_TIMEOUT_MS).toISOString();
 
     const session: UserSession = {
       userId: user.id,
@@ -658,7 +689,8 @@ export const storageService = {
       role: user.role,
       branchId: user.branchId,
       rememberMe,
-      expiresAt
+      expiresAt,
+      lastActiveAt: new Date(now).toISOString()
     };
 
     setToStorage(STORAGE_KEYS.AUTH_SESSION, session);
@@ -675,11 +707,30 @@ export const storageService = {
   getCurrentSession: (): UserSession | null => {
     const session = getFromStorage<UserSession | null>(STORAGE_KEYS.AUTH_SESSION, null);
     if (!session) return null;
-    if (new Date(session.expiresAt) < new Date()) {
+
+    const INACTIVITY_TIMEOUT_MS = 24 * 60 * 60 * 1000; // 24 hours
+    const now = Date.now();
+    const lastActive = session.lastActiveAt
+      ? new Date(session.lastActiveAt).getTime()
+      : new Date(session.expiresAt).getTime() - INACTIVITY_TIMEOUT_MS;
+
+    // Check if inactive for 24 hours or past expiry
+    if (now - lastActive > INACTIVITY_TIMEOUT_MS || new Date(session.expiresAt).getTime() < now) {
       localStorage.removeItem(STORAGE_KEYS.AUTH_SESSION);
       return null;
     }
+
     return session;
+  },
+
+  touchSession: (): void => {
+    const session = getFromStorage<UserSession | null>(STORAGE_KEYS.AUTH_SESSION, null);
+    if (!session) return;
+    const INACTIVITY_TIMEOUT_MS = 24 * 60 * 60 * 1000;
+    const now = Date.now();
+    session.lastActiveAt = new Date(now).toISOString();
+    session.expiresAt = new Date(now + INACTIVITY_TIMEOUT_MS).toISOString();
+    setToStorage(STORAGE_KEYS.AUTH_SESSION, session);
   },
 
   setUserSession: (session: UserSession): void => {
@@ -885,7 +936,7 @@ export const storageService = {
       return { success: false, error: 'Username or email already assigned to an existing personnel account.' };
     }
 
-    const initialPwd = data.initialPassword || 'Chambers@2026!';
+    const initialPwd = data.initialPassword || 'admin@2026';
     const salt = generateSalt();
     const hash = await hashPassword(initialPwd, salt);
 

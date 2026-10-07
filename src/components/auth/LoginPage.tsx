@@ -8,11 +8,7 @@ import {
   ArrowRight, 
   ShieldCheck, 
   AlertCircle, 
-  KeyRound, 
-  ArrowLeft,
-  Info,
-  ChevronDown,
-  ChevronUp
+  ArrowLeft
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { ForgotPasswordModal } from './ForgotPasswordModal';
@@ -31,7 +27,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onSuccessLogin, onReturnTo
   const [errorMsg, setErrorMsg] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isForgotOpen, setIsForgotOpen] = useState(false);
-  const [showCredentialsHelper, setShowCredentialsHelper] = useState(true);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -55,11 +50,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onSuccessLogin, onReturnTo
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const handleQuickFill = (uname: string) => {
-    setIdentifier(uname);
-    setPassword('Chambers@2026!');
   };
 
   return (
@@ -129,7 +119,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onSuccessLogin, onReturnTo
                   autoComplete="username"
                   value={identifier}
                   onChange={e => setIdentifier(e.target.value)}
-                  placeholder="e.g. principal.partner or email"
+                  placeholder="Enter username (e.g. admin)"
                   className="w-full pl-9 pr-3 py-2.5 rounded-lg border border-slate-300 text-slate-900 text-xs sm:text-sm focus:outline-hidden focus:border-amber-600 focus:ring-1 focus:ring-amber-600 transition-colors"
                 />
               </div>
@@ -182,7 +172,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onSuccessLogin, onReturnTo
                   onChange={e => setRememberMe(e.target.checked)}
                   className="rounded text-amber-600 focus:ring-amber-500 w-3.5 h-3.5 border-slate-300"
                 />
-                <span className="text-slate-600 text-xs font-medium">Keep session active (30 days)</span>
+                <span className="text-slate-600 text-xs font-medium">Keep session active (inactive timeout: 24 hours)</span>
               </label>
             </div>
 
@@ -196,74 +186,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onSuccessLogin, onReturnTo
               <ArrowRight className="w-4 h-4 text-amber-400" />
             </button>
           </form>
-
-          {/* Initial Default Accounts Reference Accordion */}
-          <div className="pt-2 border-t border-slate-100">
-            <button
-              type="button"
-              onClick={() => setShowCredentialsHelper(!showCredentialsHelper)}
-              className="w-full flex items-center justify-between text-[11px] font-semibold text-slate-500 hover:text-slate-800"
-            >
-              <span className="flex items-center space-x-1">
-                <Info className="w-3.5 h-3.5 text-amber-600" />
-                <span>Authorized Initial Setup Usernames</span>
-              </span>
-              {showCredentialsHelper ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-            </button>
-
-            {showCredentialsHelper && (
-              <div className="mt-3 p-3 bg-slate-50 border border-slate-200 rounded-lg space-y-2 text-[11px]">
-                <p className="text-slate-600 leading-tight">
-                  Initial deployment credentials configured for the 5 authorized Chambers roles (Setup password: <span className="font-mono font-bold text-slate-800">Chambers@2026!</span>):
-                </p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-1">
-                  <button
-                    type="button"
-                    onClick={() => handleQuickFill('principal.partner')}
-                    className="p-1.5 bg-white hover:bg-amber-50 border border-slate-200 rounded text-left transition-colors"
-                  >
-                    <p className="font-bold text-slate-900">1. Principal Partner</p>
-                    <p className="text-[10px] font-mono text-amber-800">principal.partner</p>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleQuickFill('head.chamber')}
-                    className="p-1.5 bg-white hover:bg-amber-50 border border-slate-200 rounded text-left transition-colors"
-                  >
-                    <p className="font-bold text-slate-900">2. Head of Chamber</p>
-                    <p className="text-[10px] font-mono text-amber-800">head.chamber</p>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleQuickFill('administrator')}
-                    className="p-1.5 bg-white hover:bg-amber-50 border border-slate-200 rounded text-left transition-colors"
-                  >
-                    <p className="font-bold text-slate-900">3. Admin / Secretary</p>
-                    <p className="text-[10px] font-mono text-amber-800">administrator</p>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleQuickFill('accounts')}
-                    className="p-1.5 bg-white hover:bg-amber-50 border border-slate-200 rounded text-left transition-colors"
-                  >
-                    <p className="font-bold text-slate-900">4. Account Officer</p>
-                    <p className="text-[10px] font-mono text-amber-800">accounts</p>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleQuickFill('counsel')}
-                    className="sm:col-span-2 p-1.5 bg-white hover:bg-amber-50 border border-slate-200 rounded text-left transition-colors"
-                  >
-                    <p className="font-bold text-slate-900">5. Counsel / Staff</p>
-                    <p className="text-[10px] font-mono text-amber-800">counsel</p>
-                  </button>
-                </div>
-                <p className="text-[10px] text-amber-900 italic pt-1">
-                  * First login using an initial password triggers mandatory <strong>Change Password</strong> before dashboard entry.
-                </p>
-              </div>
-            )}
-          </div>
         </div>
 
         {/* Security Legal Footer */}

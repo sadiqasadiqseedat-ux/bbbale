@@ -86,6 +86,44 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => unsubscribe();
   }, []);
 
+  // Track user activity to sustain active session (expires if inactive for 24 hours)
+  useEffect(() => {
+    if (!currentUser || !session) return;
+
+    let lastTouchTime = Date.now();
+    const handleActivity = () => {
+      const now = Date.now();
+      // Throttle storage write to at most once per 60 seconds
+      if (now - lastTouchTime > 60000) {
+        lastTouchTime = now;
+        storageService.touchSession();
+      }
+    };
+
+    window.addEventListener('mousemove', handleActivity);
+    window.addEventListener('keydown', handleActivity);
+    window.addEventListener('click', handleActivity);
+    window.addEventListener('scroll', handleActivity);
+
+    // Periodic check: if session expired from 24h inactivity, log out
+    const interval = setInterval(() => {
+      const current = storageService.getCurrentSession();
+      if (!current) {
+        storageService.logoutUser(currentUser || undefined);
+        setCurrentUser(null);
+        setSession(null);
+      }
+    }, 2 * 60 * 1000);
+
+    return () => {
+      window.removeEventListener('mousemove', handleActivity);
+      window.removeEventListener('keydown', handleActivity);
+      window.removeEventListener('click', handleActivity);
+      window.removeEventListener('scroll', handleActivity);
+      clearInterval(interval);
+    };
+  }, [currentUser, session]);
+
   const login = async (identifier: string, password: string, rememberMe: boolean = false) => {
     const result = await storageService.authenticateUser(identifier, password, rememberMe);
     if (result.success && result.user && result.session) {
@@ -118,7 +156,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       role: target.role,
       branchId: target.branchId,
       rememberMe: true,
-      expiresAt: new Date(Date.now() + 86400000).toISOString()
+      expiresAt: new Date(Date.now() + 86400000).toISOString(),
+      lastActiveAt: new Date().toISOString()
     };
     storageService.setUserSession(session);
     setCurrentUser(target);

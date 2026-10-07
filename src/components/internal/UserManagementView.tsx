@@ -66,7 +66,7 @@ export const UserManagementView: React.FC = () => {
     practiceAreas: '',
     bio: '',
     photoUrl: '',
-    initialPassword: 'Chambers@2026!',
+    initialPassword: 'admin@2026',
     requirePasswordChange: true,
     isPubliclyVisible: true
   });
@@ -162,7 +162,7 @@ export const UserManagementView: React.FC = () => {
       practiceAreas: createForm.practiceAreas.split(',').map(s => s.trim()).filter(Boolean),
       bio: createForm.bio.trim() || 'Legal Practitioner at B. B. BALE & CO. CHAMBERS.',
       photoUrl: createForm.photoUrl.trim(),
-      initialPassword: createForm.initialPassword.trim() || 'Chambers@2026!',
+      initialPassword: createForm.initialPassword.trim() || 'admin@2026',
       isPubliclyVisible: createForm.isPubliclyVisible,
       requiresPasswordChange: createForm.requirePasswordChange
     }, currentUser);
@@ -181,7 +181,7 @@ export const UserManagementView: React.FC = () => {
         practiceAreas: '',
         bio: '',
         photoUrl: '',
-        initialPassword: 'Chambers@2026!',
+        initialPassword: 'admin@2026',
         requirePasswordChange: true,
         isPubliclyVisible: true
       });
@@ -855,10 +855,10 @@ export const UserManagementView: React.FC = () => {
                     type="text"
                     value={createForm.initialPassword}
                     onChange={e => setCreateForm({ ...createForm, initialPassword: e.target.value })}
-                    placeholder="Chambers@2026!"
+                    placeholder="admin@2026"
                     className="w-full p-2.5 rounded-lg border border-slate-300 font-mono text-xs focus:outline-hidden focus:border-amber-600"
                   />
-                  <p className="text-[10px] text-slate-400 mt-1">Default: Chambers@2026!</p>
+                  <p className="text-[10px] text-slate-400 mt-1">Default: admin@2026</p>
                 </div>
 
                 {/* Checkboxes */}

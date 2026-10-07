@@ -64,10 +64,10 @@ export const PublicLayout: React.FC<PublicLayoutProps> = ({
             <span className="text-slate-600">·</span>
             <button
               onClick={onOpenInternal}
-              className="text-amber-400 hover:text-amber-300 font-semibold underline underline-offset-2 flex items-center space-x-1"
+              className="text-slate-500 hover:text-amber-400 transition-colors p-1 rounded-sm focus:outline-hidden"
+              aria-label="Security Access"
             >
-              <Shield className="w-3 h-3" />
-              <span>Internal Portal ({currentUser ? currentUser.role.replace('_', ' ') : 'Sign In'})</span>
+              <Shield className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>

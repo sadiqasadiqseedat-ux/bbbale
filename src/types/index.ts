@@ -54,6 +54,7 @@ export interface UserSession {
   branchId: string;
   rememberMe: boolean;
   expiresAt: string;
+  lastActiveAt?: string;
 }
 
 export interface Branch {
