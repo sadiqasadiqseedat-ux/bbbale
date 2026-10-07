@@ -56,6 +56,7 @@ export const BookConsultationPage: React.FC<BookConsultationPageProps> = ({ onNa
     branchId: 'br-abuja-01'
   });
 
+  const [formError, setFormError] = useState<string | null>(null);
   const [uploadedFiles, setUploadedFiles] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [completedData, setCompletedData] = useState<{
@@ -78,8 +79,9 @@ export const BookConsultationPage: React.FC<BookConsultationPageProps> = ({ onNa
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError(null);
     if (!formData.fullName || !formData.phone || !formData.email || !formData.preferredDate || !formData.briefEnquiry) {
-      alert('Please fill out all required fields before proceeding.');
+      setFormError('Please fill out all required fields before proceeding.');
       return;
     }
 
@@ -334,6 +336,12 @@ export const BookConsultationPage: React.FC<BookConsultationPageProps> = ({ onNa
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-md p-6 sm:p-8">
+        {formError && (
+          <div className="mb-6 p-4 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 flex items-center space-x-3 text-sm">
+            <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
+            <span>{formError}</span>
+          </div>
+        )}
         <form onSubmit={handleSubmit} className="space-y-6">
           {/* Step 1: Service Category */}
           <div className="space-y-4">

@@ -37,11 +37,13 @@ export const InternshipPage: React.FC<InternshipPageProps> = ({ onNavigateToTrac
   } | null>(null);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError(null);
     if (!formData.fullName || !formData.email || !formData.phone || !formData.institutionName || !formData.matricNumber) {
-      alert('Please fill out all required fields.');
+      setFormError('Please fill out all required fields.');
       return;
     }
 
@@ -153,6 +155,13 @@ export const InternshipPage: React.FC<InternshipPageProps> = ({ onNavigateToTrac
             <h3 className="text-lg font-serif font-bold text-slate-900 mb-6 pb-2 border-b border-slate-200">
               Apply for Internship / Externship Placement
             </h3>
+
+            {formError && (
+              <div className="mb-4 p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 flex items-center space-x-2 text-xs">
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>{formError}</span>
+              </div>
+            )}
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>

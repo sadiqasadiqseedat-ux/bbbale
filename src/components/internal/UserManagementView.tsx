@@ -49,6 +49,7 @@ export const UserManagementView: React.FC = () => {
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isResetOpen, setIsResetOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [actionNotice, setActionNotice] = useState<{ type: 'error' | 'success'; message: string } | null>(null);
 
   // Reset Password State
   const [generatedTempPassword, setGeneratedTempPassword] = useState<string | null>(null);
@@ -193,7 +194,7 @@ export const UserManagementView: React.FC = () => {
   // Open Edit Modal
   const openEditModal = (u: User) => {
     if (u.role === 'PRINCIPAL_PARTNER' && !isPrincipalPartner) {
-      alert('Unauthorized: Only the Principal Partner can modify the Principal Partner account.');
+      setActionNotice({ type: 'error', message: 'Unauthorized: Only the Principal Partner can modify the Principal Partner account.' });
       return;
     }
     setSelectedUser(u);
@@ -258,7 +259,7 @@ export const UserManagementView: React.FC = () => {
   // Open Reset Password Modal
   const openResetModal = (u: User) => {
     if (u.role === 'PRINCIPAL_PARTNER' && !isPrincipalPartner) {
-      alert('Unauthorized: Only the Principal Partner can reset their own credentials.');
+      setActionNotice({ type: 'error', message: 'Unauthorized: Only the Principal Partner can reset their own credentials.' });
       return;
     }
     setSelectedUser(u);
@@ -290,12 +291,11 @@ export const UserManagementView: React.FC = () => {
   const handleQuickStatusChange = (u: User, newStatus: AccountStatus) => {
     if (!currentUser) return;
     if (u.role === 'PRINCIPAL_PARTNER') {
-      alert('The Principal Partner account is permanently protected and cannot be deactivated or suspended.');
+      setActionNotice({ type: 'error', message: 'The Principal Partner account is permanently protected and cannot be deactivated or suspended.' });
       return;
     }
-    if (window.confirm(`Are you sure you want to change account status for ${u.name} to "${newStatus}"?`)) {
-      storageService.setUserStatus(u.id, newStatus, currentUser);
-    }
+    storageService.setUserStatus(u.id, newStatus, currentUser);
+    setActionNotice({ type: 'success', message: `Account status for ${u.name} updated to "${newStatus}".` });
   };
 
   // Quick Availability Change
@@ -357,6 +357,22 @@ export const UserManagementView: React.FC = () => {
           </button>
         )}
       </div>
+
+      {actionNotice && (
+        <div className={`p-4 rounded-xl border flex items-center justify-between text-xs font-medium ${
+          actionNotice.type === 'error'
+            ? 'bg-rose-50 border-rose-200 text-rose-800'
+            : 'bg-emerald-50 border-emerald-200 text-emerald-800'
+        }`}>
+          <span>{actionNotice.message}</span>
+          <button
+            onClick={() => setActionNotice(null)}
+            className="text-xs font-bold underline ml-4 hover:opacity-80"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {/* KPI Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">

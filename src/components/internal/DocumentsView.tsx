@@ -396,12 +396,21 @@ export const DocumentsView: React.FC = () => {
               )}
               <button
                 onClick={() => {
-                  alert(`Downloading ${previewDoc.title} (${previewDoc.documentId})...`);
+                  const content = `B. B. BALE & CO. CHAMBERS\nOFFICIAL LEGAL DOCUMENT RECORD\n\nTitle: ${previewDoc.title}\nDocument ID: ${previewDoc.documentId}\nCategory: ${previewDoc.category}\nUpload Date: ${previewDoc.uploadDate || 'N/A'}\nNotes: ${previewDoc.notes || 'Confidential legal record.'}\n${previewDoc.googleDriveLink ? `Drive Location: ${previewDoc.googleDriveLink}\n` : ''}`;
+                  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `${previewDoc.documentId}_${previewDoc.title.replace(/[^a-zA-Z0-9_-]/g, '_')}.txt`;
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                  URL.revokeObjectURL(url);
                 }}
                 className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded text-xs font-bold flex items-center space-x-1.5"
               >
                 <Download className="w-4 h-4" />
-                <span>Download Secure File</span>
+                <span>Download Document Summary</span>
               </button>
             </div>
           </div>

@@ -47,14 +47,16 @@ export const TrackingCentrePage: React.FC = () => {
   const [receiptDataUrl, setReceiptDataUrl] = useState('');
   const [paymentSubmitting, setPaymentSubmitting] = useState(false);
   const [paymentSubmitSuccess, setPaymentSubmitSuccess] = useState(false);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
 
   const handleReceiptUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 5 * 1024 * 1024) {
-      alert('Receipt file must be 5MB or smaller.');
+      setPaymentError('Receipt file must be 5MB or smaller.');
       return;
     }
+    setPaymentError(null);
     setReceiptFileName(file.name);
     const reader = new FileReader();
     reader.onload = () => {
@@ -67,9 +69,10 @@ export const TrackingCentrePage: React.FC = () => {
     e.preventDefault();
     if (!trackedRecord || trackedRecord.type !== 'payment') return;
     if (!paymentForm.bankTransactionRef.trim()) {
-      alert('Please enter the bank transaction reference number.');
+      setPaymentError('Please enter the bank transaction reference number.');
       return;
     }
+    setPaymentError(null);
     setPaymentSubmitting(true);
     storageService.submitPayment({
       paymentReference: trackedRecord.data.paymentReference,
@@ -707,6 +710,13 @@ export const TrackingCentrePage: React.FC = () => {
                         <h4 className="text-sm font-serif font-bold text-slate-900 mb-1">Submit Payment for Verification</h4>
                         <p className="text-xs text-slate-500">Enter your transaction details and upload the payment receipt.</p>
                       </div>
+
+                      {paymentError && (
+                        <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-lg text-xs flex items-center space-x-2">
+                          <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                          <span>{paymentError}</span>
+                        </div>
+                      )}
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div>

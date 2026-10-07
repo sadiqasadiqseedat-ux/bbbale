@@ -68,8 +68,10 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({ isOpen
     try {
       const res = await completePasswordReset(tokenInput.trim(), newPassword);
       if (res.success) {
-        alert('Password has been successfully reset! You can now log in with your new password.');
-        onClose();
+        setMessage('Password has been successfully reset! You can now log in with your new password.');
+        setTimeout(() => {
+          onClose();
+        }, 1500);
       } else {
         setErrorMsg(res.error || 'Failed to complete reset.');
       }

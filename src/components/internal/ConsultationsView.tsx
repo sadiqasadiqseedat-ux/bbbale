@@ -30,6 +30,7 @@ export const ConsultationsView: React.FC = () => {
   const [matterCategory, setMatterCategory] = useState<Matter['category']>('Litigation');
   const [clientVisibleUpdate, setClientVisibleUpdate] = useState('');
   const [privilegedNotes, setPrivilegedNotes] = useState('');
+  const [feedbackNotice, setFeedbackNotice] = useState<string | null>(null);
 
   const loadData = () => {
     setConsultations(storageService.getConsultations());
@@ -92,7 +93,7 @@ export const ConsultationsView: React.FC = () => {
     handleUpdateStatus('Matter Opened', `Formal matter opened: ${newMatter.matterId} (${matterTitle}). Legal process ongoing under conduct of Counsel.`);
 
     setIsConvertToMatterOpen(false);
-    alert(`Matter ${newMatter.matterId} successfully created for ${selectedConsultation.fullName}!`);
+    setFeedbackNotice(`Matter ${newMatter.matterId} successfully created for ${selectedConsultation.fullName}!`);
   };
 
   const filtered = consultations.filter(c => 
@@ -114,6 +115,21 @@ export const ConsultationsView: React.FC = () => {
           </p>
         </div>
       </div>
+
+      {feedbackNotice && (
+        <div className="p-4 bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-xl flex items-center justify-between text-sm">
+          <div className="flex items-center space-x-2">
+            <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+            <span className="font-medium">{feedbackNotice}</span>
+          </div>
+          <button 
+            onClick={() => setFeedbackNotice(null)}
+            className="text-xs font-semibold text-emerald-700 hover:text-emerald-900"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex items-center space-x-3">
         <Search className="w-4 h-4 text-slate-400" />
