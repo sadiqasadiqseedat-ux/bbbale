@@ -34,7 +34,8 @@ import {
   AuditLog,
   UserRole,
   UserSession,
-  WebsiteContent
+  WebsiteContent,
+  QuitNotice
 } from '../types';
 import { 
   generateSalt, 
@@ -374,6 +375,10 @@ const INITIAL_WEBSITE_CONTENT: WebsiteContent = {
   consultationFeeStandard: 35000,
   internshipPolicyNotice: 'Chambers welcomes Bar Part II externs from the Nigerian Law School and law undergraduates from recognized universities.',
   recoveryOfPremisesNotice: 'Statutory notice periods must not be mechanically applied; each notice is formulated in accordance with applicable State tenancy legislation and agreements.',
+  invoiceBankName: 'First Bank of Nigeria PLC',
+  invoiceAccountName: 'B. B. BALE & CO. (CLIENT SERVICES)',
+  invoiceAccountNumber: '2039485712',
+  invoicePaymentMethod: 'Bank Transfer',
   lastUpdated: new Date().toISOString(),
   updatedBy: 'Barrister B. B. Bale, SAN'
 };
@@ -402,6 +407,7 @@ const STORAGE_KEYS = {
   TENANCIES: 'bb_tenancies_v1',
   RENT_RECORDS: 'bb_rent_records_v1',
   PROPERTY_DISPUTES: 'bb_property_disputes_v1',
+  QUIT_NOTICES: 'bb_quit_notices_v1',
   INVOICES: 'bb_invoices_v1',
   PAYMENTS: 'bb_payments_v1',
   EXPENSES: 'bb_expenses_v1',
@@ -856,6 +862,8 @@ export const storageService = {
     bio: string;
     photoUrl: string;
     initialPassword?: string;
+    isPubliclyVisible?: boolean;
+    requiresPasswordChange?: boolean;
   }, actor: User): Promise<{ success: boolean; user?: User; error?: string }> => {
     // Validate authority: Only Principal Partner or Head of Chamber
     if (actor.role !== 'PRINCIPAL_PARTNER' && actor.role !== 'HEAD_OF_CHAMBER') {
@@ -892,14 +900,14 @@ export const storageService = {
       title: data.title,
       practiceAreas: data.practiceAreas,
       bio: data.bio,
-      photoUrl: data.photoUrl || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=600',
+      photoUrl: data.photoUrl || '',
       availability: 'AVAILABLE',
-      isPubliclyVisible: data.role === 'COUNSEL_STAFF' || data.role === 'HEAD_OF_CHAMBER' || data.role === 'PRINCIPAL_PARTNER',
+      isPubliclyVisible: data.isPubliclyVisible ?? (data.role === 'COUNSEL_STAFF' || data.role === 'HEAD_OF_CHAMBER' || data.role === 'PRINCIPAL_PARTNER'),
       isActive: true,
       accountStatus: 'Active',
       salt,
       passwordHash: hash,
-      requiresPasswordChange: true,
+      requiresPasswordChange: data.requiresPasswordChange ?? true,
       failedLoginAttempts: 0,
       createdAt: new Date().toISOString()
     };
@@ -941,6 +949,11 @@ export const storageService = {
     // Head of Chamber cannot promote anyone to Principal Partner
     if (updatedUser.role === 'PRINCIPAL_PARTNER' && actor.role !== 'PRINCIPAL_PARTNER') {
       return { success: false, error: 'Unauthorized: Only the Principal Partner can assign the Principal Partner role.' };
+    }
+
+    // Administrator / Secretary cannot change user roles
+    if (actor.role === 'ADMINISTRATOR_SECRETARY' && updatedUser.role !== existing.role) {
+      return { success: false, error: 'Unauthorized: Administrator / Secretary cannot modify user role assignments.' };
     }
 
     const sanitizedUser: User = {
@@ -1190,6 +1203,20 @@ export const storageService = {
     logAudit(actor, 'CREATE_INVOICE', 'Invoice', newInvoice.id, `Generated invoice ${invoiceNumber} for ${newInvoice.clientName} (₦${newInvoice.totalAmount.toLocaleString()})`);
     return newInvoice;
   },
+  updateInvoice: (updatedInvoice: Invoice, actor: User): { success: boolean; error?: string } => {
+    if (actor.role !== 'PRINCIPAL_PARTNER' && actor.role !== 'HEAD_OF_CHAMBER') {
+      return { success: false, error: 'Unauthorized: Only the Principal Partner or Head of Chamber can edit invoice details.' };
+    }
+    const invoices = storageService.getInvoices();
+    const existing = invoices.find(i => i.id === updatedInvoice.id);
+    if (!existing) {
+      return { success: false, error: 'Invoice not found in Chambers registry.' };
+    }
+    const updated = invoices.map(i => i.id === updatedInvoice.id ? updatedInvoice : i);
+    setToStorage(STORAGE_KEYS.INVOICES, updated);
+    logAudit(actor, 'UPDATE_INVOICE', 'Invoice', updatedInvoice.id, `${actor.name} edited invoice ${updatedInvoice.invoiceNumber} for ${updatedInvoice.clientName}`);
+    return { success: true };
+  },
   submitInvoiceForApproval: (invoiceCode: string, reason: string, actor: User): { success: boolean; request?: ApprovalRequest; error?: string } => {
     const invoices = storageService.getInvoices();
     const invoice = invoices.find(i => i.invoiceNumber.trim().toUpperCase() === invoiceCode.trim().toUpperCase());
@@ -1231,6 +1258,7 @@ export const storageService = {
     paymentMethod: PaymentRecord['paymentMethod'];
     bankTransactionRef?: string;
     notes?: string;
+    proofDocumentUrl?: string;
   }): PaymentRecord => {
     const payments = storageService.getPayments();
     const invoicesList = storageService.getInvoices();
@@ -1247,6 +1275,7 @@ export const storageService = {
       status: 'PAYMENT_SUBMITTED',
       bankTransactionRef: data.bankTransactionRef,
       verificationNotes: data.notes,
+      proofDocumentUrl: data.proofDocumentUrl,
       submittedAt: new Date().toISOString()
     };
     setToStorage(STORAGE_KEYS.PAYMENTS, [newPayment, ...payments]);
@@ -1723,6 +1752,100 @@ export const storageService = {
     const list = storageService.getPropertyDisputes().map(d => d.id === dispute.id ? dispute : d);
     setToStorage(STORAGE_KEYS.PROPERTY_DISPUTES, list);
     logAudit(actor, 'UPDATE_PREMISES_RECOVERY', 'PropertyDispute', dispute.id, `Stage updated to: ${dispute.workflowStage}`);
+  },
+
+  // Quit Notices
+  getQuitNotices: (): QuitNotice[] => getFromStorage<QuitNotice[]>(STORAGE_KEYS.QUIT_NOTICES, []),
+  issueQuitNotice: (data: {
+    tenantId: string;
+    tenantName: string;
+    propertyId: string;
+    propertyName: string;
+    landlordId: string;
+    landlordName: string;
+    unitNumber: string;
+    noticeType: QuitNotice['noticeType'];
+    noticeDate: string;
+    noticeExpiryDate: string;
+    reason: string;
+    statutoryBasis: string;
+  }, actor: User): QuitNotice => {
+    const list = storageService.getQuitNotices();
+    const quitNoticeId = getNextNumber('quit_notice', 'QNT');
+    const newNotice: QuitNotice = {
+      ...data,
+      id: `qn-${Date.now()}`,
+      quitNoticeId,
+      status: 'Issued',
+      issuedById: actor.id,
+      issuedByName: actor.name,
+      createdAt: new Date().toISOString()
+    };
+    setToStorage(STORAGE_KEYS.QUIT_NOTICES, [newNotice, ...list]);
+    logAudit(actor, 'ISSUE_QUIT_NOTICE', 'QuitNotice', newNotice.id, `Issued ${data.noticeType} to ${data.tenantName} for unit ${data.unitNumber} at ${data.propertyName}`);
+
+    // Update tenant status to reflect quit notice
+    const tenants = storageService.getTenants().map(t => {
+      if (t.id === data.tenantId) {
+        return { ...t, status: 'Terminated' as const };
+      }
+      return t;
+    });
+    setToStorage(STORAGE_KEYS.TENANTS, tenants);
+
+    dispatchNotification(
+      'Quit Notice Issued',
+      `${data.noticeType} issued to ${data.tenantName} (Unit ${data.unitNumber}, ${data.propertyName}). Expiry: ${data.noticeExpiryDate}.`,
+      'urgent',
+      'HEAD_OF_CHAMBER'
+    );
+
+    return newNotice;
+  },
+  updateQuitNoticeStatus: (id: string, status: QuitNotice['status'], actor: User): void => {
+    const list = storageService.getQuitNotices().map(q => q.id === id ? { ...q, status } : q);
+    setToStorage(STORAGE_KEYS.QUIT_NOTICES, list);
+    logAudit(actor, 'UPDATE_QUIT_NOTICE', 'QuitNotice', id, `Quit notice status updated to: ${status}`);
+  },
+
+  // Rent Due Notification Check — generates notifications 30 days before tenancy expiry
+  checkRentDueNotifications: (): void => {
+    const tenancies = storageService.getTenancies();
+    const tenants = storageService.getTenants();
+    const properties = storageService.getProperties();
+    const existingNotifs = storageService.getNotifications();
+    const now = new Date();
+    const thirtyDaysFromNow = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+    tenancies.forEach(tenancy => {
+      if (tenancy.status === 'Terminated' || tenancy.status === 'Expired') return;
+
+      const expiryDate = new Date(tenancy.expiryDate);
+      const daysUntilExpiry = Math.ceil((expiryDate.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
+
+      // Only notify if within 30 days of due date and not already notified
+      if (daysUntilExpiry <= 30 && daysUntilExpiry >= 0) {
+        const tenant = tenants.find(t => t.id === tenancy.tenantId);
+        const property = properties.find(p => p.id === tenancy.propertyId);
+        const notifKey = `rent-due-${tenancy.id}-${tenancy.expiryDate}`;
+
+        // Check if notification already exists for this tenancy/expiry
+        const alreadyNotified = existingNotifs.some(n =>
+          n.linkAction === notifKey
+        );
+
+        if (!alreadyNotified) {
+          dispatchNotification(
+            'Rent Payment Due Soon',
+            `Tenancy for ${tenant?.fullName || 'Tenant'} at ${property?.name || 'Property'} (Unit ${tenancy.unitNumber}) expires on ${tenancy.expiryDate}. Rent of ₦${tenancy.rentAmount.toLocaleString()} is due in ${daysUntilExpiry} day(s). Please arrange payment.`,
+            'warning',
+            undefined,
+            undefined,
+            notifKey
+          );
+        }
+      }
+    });
   },
 
   // Institutions & Students & Internships

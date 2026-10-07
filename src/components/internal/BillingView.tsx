@@ -16,11 +16,12 @@ import {
 } from 'lucide-react';
 import { storageService, subscribeToStore } from '../../services/storage';
 import { useAuth } from '../../context/AuthContext';
-import { Invoice, PaymentRecord, ExpenseRecord, Client } from '../../types';
+import { Invoice, InvoiceItem, PaymentRecord, ExpenseRecord, Client } from '../../types';
 import { PrintDocumentModal, PrintableDocumentType } from '../common/PrintDocument';
 
 export const BillingView: React.FC = () => {
-  const { currentUser, canVerifyPayments, isAccountOfficer } = useAuth();
+  const { currentUser, canVerifyPayments, isAccountOfficer, isPrincipalPartner, isHeadOfChamber } = useAuth();
+  const canEditInvoices = isPrincipalPartner || isHeadOfChamber;
   const [activeTab, setActiveTab] = useState<'invoices' | 'payments' | 'expenses'>('invoices');
 
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -45,6 +46,10 @@ export const BillingView: React.FC = () => {
   // Verify Payment Modal
   const [selectedPaymentToVerify, setSelectedPaymentToVerify] = useState<PaymentRecord | null>(null);
   const [verificationNotes, setVerificationNotes] = useState('');
+
+  // Edit Invoice Modal
+  const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
+  const [editForm, setEditForm] = useState<Invoice | null>(null);
 
   // New Expense Modal
   const [isAddExpenseOpen, setIsAddExpenseOpen] = useState(false);
@@ -102,6 +107,40 @@ export const BillingView: React.FC = () => {
       dueDate: new Date(Date.now() + 86400000 * 14).toISOString().split('T')[0],
       notes: 'Payment required before filing of substantive court processes.'
     });
+  };
+
+  const handleOpenEditInvoice = (inv: Invoice) => {
+    setEditingInvoice(inv);
+    setEditForm({ ...inv, items: inv.items.map(item => ({ ...item })) });
+  };
+
+  const handleUpdateEditItem = (index: number, field: keyof InvoiceItem, value: string | number) => {
+    if (!editForm) return;
+    const items = editForm.items.map((item, i) => i === index ? { ...item, [field]: field === 'amount' ? Number(value) : value } : item);
+    const subtotal = items.reduce((sum, item) => sum + item.amount, 0);
+    setEditForm({ ...editForm, items, subtotal, totalAmount: subtotal + editForm.taxAmount });
+  };
+
+  const handleAddEditItem = () => {
+    if (!editForm) return;
+    setEditForm({ ...editForm, items: [...editForm.items, { description: '', amount: 0 }] });
+  };
+
+  const handleRemoveEditItem = (index: number) => {
+    if (!editForm || editForm.items.length <= 1) return;
+    const items = editForm.items.filter((_, i) => i !== index);
+    const subtotal = items.reduce((sum, item) => sum + item.amount, 0);
+    setEditForm({ ...editForm, items, subtotal, totalAmount: subtotal + editForm.taxAmount });
+  };
+
+  const handleSaveInvoice = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editForm || !currentUser || !editingInvoice) return;
+    const result = storageService.updateInvoice(editForm, currentUser);
+    if (result.success) {
+      setEditingInvoice(null);
+      setEditForm(null);
+    }
   };
 
   const handleVerifyPayment = (isApproved: boolean) => {
@@ -297,7 +336,15 @@ export const BillingView: React.FC = () => {
                           {inv.paymentStatus.replace('_', ' ')}
                         </span>
                       </td>
-                      <td className="p-3.5 text-right">
+                      <td className="p-3.5 text-right space-x-1">
+                        {canEditInvoices && (
+                          <button
+                            onClick={() => handleOpenEditInvoice(inv)}
+                            className="px-2.5 py-1 text-xs text-blue-700 hover:text-blue-900 font-semibold border border-blue-300 rounded hover:bg-blue-50"
+                          >
+                            Edit
+                          </button>
+                        )}
                         <button
                           onClick={() => setPrintDoc({ type: 'INVOICE', data: inv })}
                           className="px-2.5 py-1 text-xs text-amber-700 hover:text-amber-900 font-semibold border border-amber-300 rounded hover:bg-amber-50"
@@ -697,6 +744,233 @@ export const BillingView: React.FC = () => {
                   className="px-5 py-2 bg-slate-900 text-amber-400 rounded font-bold"
                 >
                   Record Expense
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Invoice Modal */}
+      {editingInvoice && editForm && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6 space-y-4 border border-slate-300">
+            <div className="flex items-center justify-between pb-2 border-b">
+              <h3 className="font-serif font-bold text-base text-slate-900">
+                Edit Invoice — {editingInvoice.invoiceNumber}
+              </h3>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-100 text-blue-800">
+                {isPrincipalPartner ? 'Principal Partner' : 'Head of Chamber'} Edit Mode
+              </span>
+            </div>
+
+            <form onSubmit={handleSaveInvoice} className="space-y-4 text-xs">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Invoice Number:</label>
+                  <input
+                    type="text"
+                    value={editForm.invoiceNumber}
+                    onChange={e => setEditForm({ ...editForm, invoiceNumber: e.target.value })}
+                    className="w-full p-2.5 rounded border border-slate-300 font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Payment Reference:</label>
+                  <input
+                    type="text"
+                    value={editForm.paymentReference}
+                    onChange={e => setEditForm({ ...editForm, paymentReference: e.target.value })}
+                    className="w-full p-2.5 rounded border border-slate-300 font-mono"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Client Full Name / Entity: *</label>
+                <input
+                  type="text"
+                  required
+                  value={editForm.clientName}
+                  onChange={e => setEditForm({ ...editForm, clientName: e.target.value })}
+                  className="w-full p-2.5 rounded border border-slate-300"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Email:</label>
+                  <input
+                    type="email"
+                    value={editForm.clientEmail}
+                    onChange={e => setEditForm({ ...editForm, clientEmail: e.target.value })}
+                    className="w-full p-2.5 rounded border border-slate-300"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Phone:</label>
+                  <input
+                    type="tel"
+                    value={editForm.clientPhone}
+                    onChange={e => setEditForm({ ...editForm, clientPhone: e.target.value })}
+                    className="w-full p-2.5 rounded border border-slate-300"
+                  />
+                </div>
+              </div>
+
+              {/* Line Items */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block font-semibold text-slate-700">Line Items / Services:</label>
+                  <button
+                    type="button"
+                    onClick={handleAddEditItem}
+                    className="px-2 py-1 text-[10px] font-bold bg-slate-800 text-white rounded hover:bg-slate-700 flex items-center space-x-1"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>Add Item</span>
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  {editForm.items.map((item, idx) => (
+                    <div key={idx} className="flex items-center space-x-2">
+                      <input
+                        type="text"
+                        placeholder="Description"
+                        value={item.description}
+                        onChange={e => handleUpdateEditItem(idx, 'description', e.target.value)}
+                        className="flex-1 p-2 rounded border border-slate-300"
+                      />
+                      <input
+                        type="number"
+                        min="0"
+                        placeholder="Amount"
+                        value={item.amount}
+                        onChange={e => handleUpdateEditItem(idx, 'amount', e.target.value)}
+                        className="w-28 p-2 rounded border border-slate-300 font-mono"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveEditItem(idx)}
+                        className="p-2 text-red-600 hover:bg-red-50 rounded border border-red-200"
+                        disabled={editForm.items.length <= 1}
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Subtotal (₦):</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={editForm.subtotal}
+                    onChange={e => {
+                      const subtotal = Number(e.target.value);
+                      setEditForm({ ...editForm, subtotal, totalAmount: subtotal + editForm.taxAmount });
+                    }}
+                    className="w-full p-2.5 rounded border border-slate-300 font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Tax (₦):</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={editForm.taxAmount}
+                    onChange={e => {
+                      const taxAmount = Number(e.target.value);
+                      setEditForm({ ...editForm, taxAmount, totalAmount: editForm.subtotal + taxAmount });
+                    }}
+                    className="w-full p-2.5 rounded border border-slate-300 font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Total (₦):</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={editForm.totalAmount}
+                    onChange={e => setEditForm({ ...editForm, totalAmount: Number(e.target.value) })}
+                    className="w-full p-2.5 rounded border border-slate-300 font-mono font-bold"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Date Issued:</label>
+                  <input
+                    type="date"
+                    value={editForm.date}
+                    onChange={e => setEditForm({ ...editForm, date: e.target.value })}
+                    className="w-full p-2.5 rounded border border-slate-300"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Due Date:</label>
+                  <input
+                    type="date"
+                    value={editForm.dueDate}
+                    onChange={e => setEditForm({ ...editForm, dueDate: e.target.value })}
+                    className="w-full p-2.5 rounded border border-slate-300"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Payment Status:</label>
+                  <select
+                    value={editForm.paymentStatus}
+                    onChange={e => setEditForm({ ...editForm, paymentStatus: e.target.value as Invoice['paymentStatus'] })}
+                    className="w-full p-2.5 rounded border border-slate-300 bg-white"
+                  >
+                    <option value="UNPAID">UNPAID</option>
+                    <option value="PAYMENT_SUBMITTED">PAYMENT SUBMITTED</option>
+                    <option value="PAYMENT_VERIFIED">PAYMENT VERIFIED</option>
+                    <option value="CANCELLED">CANCELLED</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Payment Method:</label>
+                  <input
+                    type="text"
+                    value={editForm.paymentMethod || ''}
+                    onChange={e => setEditForm({ ...editForm, paymentMethod: e.target.value })}
+                    placeholder="e.g. Bank Transfer"
+                    className="w-full p-2.5 rounded border border-slate-300"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Notes / Terms:</label>
+                <textarea
+                  rows={2}
+                  value={editForm.notes || ''}
+                  onChange={e => setEditForm({ ...editForm, notes: e.target.value })}
+                  className="w-full p-2.5 rounded border border-slate-300"
+                />
+              </div>
+
+              <div className="flex justify-end space-x-2 pt-2 border-t">
+                <button
+                  type="button"
+                  onClick={() => { setEditingInvoice(null); setEditForm(null); }}
+                  className="px-4 py-2 border rounded font-semibold text-slate-700"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded font-bold"
+                >
+                  Save Changes
                 </button>
               </div>
             </form>

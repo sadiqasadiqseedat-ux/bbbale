@@ -502,6 +502,63 @@ export const WebsiteManagementView: React.FC = () => {
             </div>
           </div>
 
+          {/* Invoice & Payment Settlement Details */}
+          <div className="border-t border-slate-200 pt-5">
+            <h3 className="font-serif font-bold text-slate-900 mb-1">
+              Invoice & Payment Settlement Details
+            </h3>
+            <p className="text-slate-500 mb-4">
+              These details appear on every printed invoice and the public consultation payment instructions. Edit bank name, account name, account number, and accepted payment method.
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Bank Name:
+                </label>
+                <input
+                  type="text"
+                  value={cmsContent.invoiceBankName}
+                  onChange={e => setCmsContent({ ...cmsContent, invoiceBankName: e.target.value })}
+                  className="w-full p-2.5 border border-slate-300 rounded-lg focus:outline-hidden focus:border-amber-600"
+                />
+              </div>
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Account Name:
+                </label>
+                <input
+                  type="text"
+                  value={cmsContent.invoiceAccountName}
+                  onChange={e => setCmsContent({ ...cmsContent, invoiceAccountName: e.target.value })}
+                  className="w-full p-2.5 border border-slate-300 rounded-lg focus:outline-hidden focus:border-amber-600"
+                />
+              </div>
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Account Number:
+                </label>
+                <input
+                  type="text"
+                  value={cmsContent.invoiceAccountNumber}
+                  onChange={e => setCmsContent({ ...cmsContent, invoiceAccountNumber: e.target.value })}
+                  className="w-full p-2.5 border border-slate-300 rounded-lg font-mono font-bold focus:outline-hidden focus:border-amber-600"
+                />
+              </div>
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Accepted Payment Method:
+                </label>
+                <input
+                  type="text"
+                  value={cmsContent.invoicePaymentMethod}
+                  onChange={e => setCmsContent({ ...cmsContent, invoicePaymentMethod: e.target.value })}
+                  placeholder="e.g. Bank Transfer, Online Payment Gateway, POS, Cash"
+                  className="w-full p-2.5 border border-slate-300 rounded-lg focus:outline-hidden focus:border-amber-600"
+                />
+              </div>
+            </div>
+          </div>
+
           <div className="flex justify-end pt-4 border-t border-slate-200">
             <button
               type="submit"

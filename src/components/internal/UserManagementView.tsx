@@ -29,7 +29,13 @@ import { useAuth } from '../../context/AuthContext';
 import { User, UserRole, AvailabilityStatus, AccountStatus, Branch } from '../../types';
 
 export const UserManagementView: React.FC = () => {
-  const { currentUser, isPrincipalPartner, isHeadOfChamber } = useAuth();
+  const { currentUser, isPrincipalPartner, isHeadOfChamber, isAdminSecretary } = useAuth();
+
+  // Derived values — must be declared BEFORE any state that references them
+  const userBranchId = currentUser?.branchId || 'br-abuja-01';
+  const isBranchScoped = !isPrincipalPartner;
+  const canManage = isPrincipalPartner || isHeadOfChamber || isAdminSecretary;
+  const canCreateUsers = isPrincipalPartner || isHeadOfChamber;
 
   const [users, setUsers] = useState<User[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -55,11 +61,11 @@ export const UserManagementView: React.FC = () => {
     email: '',
     phone: '',
     role: 'COUNSEL_STAFF' as UserRole,
-    branchId: 'br-abuja-01',
+    branchId: userBranchId,
     title: '',
     practiceAreas: '',
     bio: '',
-    photoUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=600',
+    photoUrl: '',
     initialPassword: 'Chambers@2026!',
     requirePasswordChange: true,
     isPubliclyVisible: true
@@ -96,8 +102,10 @@ export const UserManagementView: React.FC = () => {
     return () => unsub();
   }, []);
 
-  // Filtered Users
-  const filteredUsers = users.filter(u => {
+  // Filtered Users — non-Principal Partner users are scoped to their own branch
+  const scopedUsers = isBranchScoped ? users.filter(u => u.branchId === userBranchId) : users;
+
+  const filteredUsers = scopedUsers.filter(u => {
     const matchesSearch = 
       u.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       u.username.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -107,13 +115,10 @@ export const UserManagementView: React.FC = () => {
 
     const matchesRole = roleFilter === 'ALL' || u.role === roleFilter;
     const matchesStatus = statusFilter === 'ALL' || u.accountStatus === statusFilter;
-    const matchesBranch = branchFilter === 'ALL' || u.branchId === branchFilter;
+    const matchesBranch = isBranchScoped ? true : (branchFilter === 'ALL' || u.branchId === branchFilter);
 
     return matchesSearch && matchesRole && matchesStatus && matchesBranch;
   });
-
-  // Check if current user is authorized to manage users
-  const canManage = isPrincipalPartner || isHeadOfChamber;
 
   if (!canManage) {
     return (
@@ -121,7 +126,7 @@ export const UserManagementView: React.FC = () => {
         <ShieldAlert className="w-12 h-12 text-red-600 mx-auto" />
         <h2 className="font-serif text-lg font-bold text-red-900">Access Restricted: Authorized Administrators Only</h2>
         <p className="text-xs text-red-700 max-w-md mx-auto">
-          User Account & Privilege Administration is restricted to the Principal Partner and Head of Chamber.
+          User Account & Privilege Administration is restricted to the Principal Partner, Head of Chamber, and Administrator / Secretary.
         </p>
       </div>
     );
@@ -157,7 +162,9 @@ export const UserManagementView: React.FC = () => {
       practiceAreas: createForm.practiceAreas.split(',').map(s => s.trim()).filter(Boolean),
       bio: createForm.bio.trim() || 'Legal Practitioner at B. B. BALE & CO. CHAMBERS.',
       photoUrl: createForm.photoUrl.trim(),
-      initialPassword: createForm.initialPassword.trim() || 'Chambers@2026!'
+      initialPassword: createForm.initialPassword.trim() || 'Chambers@2026!',
+      isPubliclyVisible: createForm.isPubliclyVisible,
+      requiresPasswordChange: createForm.requirePasswordChange
     }, currentUser);
 
     if (res.success && res.user) {
@@ -169,11 +176,11 @@ export const UserManagementView: React.FC = () => {
         email: '',
         phone: '',
         role: 'COUNSEL_STAFF',
-        branchId: 'br-abuja-01',
+        branchId: userBranchId,
         title: '',
         practiceAreas: '',
         bio: '',
-        photoUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=600',
+        photoUrl: '',
         initialPassword: 'Chambers@2026!',
         requirePasswordChange: true,
         isPubliclyVisible: true
@@ -315,16 +322,6 @@ export const UserManagementView: React.FC = () => {
     }, currentUser);
   };
 
-  // Quick Photo Preset Selection
-  const photoPresets = [
-    { label: 'Male Counsel 1', url: 'https://images.unsplash.com/photo-1556157382-97eda2d62296?auto=format&fit=crop&q=80&w=600' },
-    { label: 'Female Counsel 1', url: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&q=80&w=600' },
-    { label: 'Female Administrator', url: 'https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&q=80&w=600' },
-    { label: 'Male Accountant', url: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=600' },
-    { label: 'Male Associate', url: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&q=80&w=600' },
-    { label: 'Female Associate', url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=600' }
-  ];
-
   return (
     <div className="space-y-6">
       {/* Top Banner */}
@@ -336,7 +333,7 @@ export const UserManagementView: React.FC = () => {
             </span>
             <span className="text-slate-300">·</span>
             <span className="text-xs text-slate-500 font-medium">
-              Authorized Authority: {isPrincipalPartner ? 'Principal Partner (Global)' : 'Head of Chamber (Operational)'}
+              Authorized Authority: {isPrincipalPartner ? 'Principal Partner (Global — All Branches)' : isHeadOfChamber ? 'Head of Chamber (Branch-Scoped)' : 'Administrator / Secretary (Branch-Scoped)'}
             </span>
           </div>
           <h1 className="text-2xl font-serif font-bold text-slate-900 mt-1">
@@ -347,50 +344,52 @@ export const UserManagementView: React.FC = () => {
           </p>
         </div>
 
-        <button
-          onClick={() => {
-            setFormError('');
-            setIsCreateOpen(true);
-          }}
-          className="px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold shadow-xs flex items-center space-x-2 transition-colors shrink-0"
-        >
-          <UserPlus className="w-4 h-4" />
-          <span>Provision New User Account</span>
-        </button>
+        {canCreateUsers && (
+          <button
+            onClick={() => {
+              setFormError('');
+              setIsCreateOpen(true);
+            }}
+            className="px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold shadow-xs flex items-center space-x-2 transition-colors shrink-0"
+          >
+            <UserPlus className="w-4 h-4" />
+            <span>Provision New User Account</span>
+          </button>
+        )}
       </div>
 
       {/* KPI Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
           <p className="text-[11px] font-bold text-slate-500 uppercase">Total Personnel</p>
-          <p className="text-2xl font-serif font-bold text-slate-900 mt-1">{users.length}</p>
-          <p className="text-[10px] text-slate-400">All Chambers Accounts</p>
+          <p className="text-2xl font-serif font-bold text-slate-900 mt-1">{scopedUsers.length}</p>
+          <p className="text-[10px] text-slate-400">{isBranchScoped ? 'Your Branch Accounts' : 'All Chambers Accounts'}</p>
         </div>
         <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
           <p className="text-[11px] font-bold text-emerald-700 uppercase">Active Accounts</p>
           <p className="text-2xl font-serif font-bold text-emerald-700 mt-1">
-            {users.filter(u => u.accountStatus === 'Active').length}
+            {scopedUsers.filter(u => u.accountStatus === 'Active').length}
           </p>
           <p className="text-[10px] text-slate-400">Normal Authorized Access</p>
         </div>
         <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
           <p className="text-[11px] font-bold text-amber-700 uppercase">Password Reset Req.</p>
           <p className="text-2xl font-serif font-bold text-amber-700 mt-1">
-            {users.filter(u => u.requiresPasswordChange).length}
+            {scopedUsers.filter(u => u.requiresPasswordChange).length}
           </p>
           <p className="text-[10px] text-slate-400">Pending First/Reset Login</p>
         </div>
         <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
           <p className="text-[11px] font-bold text-red-700 uppercase">Suspended / Inactive</p>
           <p className="text-2xl font-serif font-bold text-red-700 mt-1">
-            {users.filter(u => u.accountStatus === 'Suspended' || u.accountStatus === 'Inactive').length}
+            {scopedUsers.filter(u => u.accountStatus === 'Suspended' || u.accountStatus === 'Inactive').length}
           </p>
           <p className="text-[10px] text-slate-400">Blocked Access</p>
         </div>
         <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
           <p className="text-[11px] font-bold text-blue-700 uppercase">Public Profiles</p>
           <p className="text-2xl font-serif font-bold text-blue-700 mt-1">
-            {users.filter(u => u.isPubliclyVisible).length}
+            {scopedUsers.filter(u => u.isPubliclyVisible).length}
           </p>
           <p className="text-[10px] text-slate-400">Visible on Public Site</p>
         </div>
@@ -435,16 +434,18 @@ export const UserManagementView: React.FC = () => {
             <option value="Inactive">Inactive</option>
           </select>
 
-          <select
-            value={branchFilter}
-            onChange={e => setBranchFilter(e.target.value)}
-            className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-2 text-slate-700 font-medium focus:outline-hidden"
-          >
-            <option value="ALL">All Branches</option>
-            {branches.map(b => (
-              <option key={b.id} value={b.id}>{b.name}</option>
-            ))}
-          </select>
+          {!isBranchScoped && (
+            <select
+              value={branchFilter}
+              onChange={e => setBranchFilter(e.target.value)}
+              className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-2 text-slate-700 font-medium focus:outline-hidden"
+            >
+              <option value="ALL">All Branches</option>
+              {branches.map(b => (
+                <option key={b.id} value={b.id}>{b.name}</option>
+              ))}
+            </select>
+          )}
         </div>
       </div>
 
@@ -762,12 +763,22 @@ export const UserManagementView: React.FC = () => {
                   <select
                     value={createForm.branchId}
                     onChange={e => setCreateForm({ ...createForm, branchId: e.target.value })}
-                    className="w-full p-2.5 rounded-lg border border-slate-300 text-xs focus:outline-hidden focus:border-amber-600"
+                    disabled={isBranchScoped}
+                    className="w-full p-2.5 rounded-lg border border-slate-300 text-xs focus:outline-hidden focus:border-amber-600 disabled:bg-slate-100 disabled:cursor-not-allowed"
                   >
-                    {branches.map(b => (
-                      <option key={b.id} value={b.id}>{b.name} ({b.state})</option>
-                    ))}
+                    {isBranchScoped ? (
+                      <option value={userBranchId}>
+                        {branches.find(b => b.id === userBranchId)?.name || 'Your Branch'} ({branches.find(b => b.id === userBranchId)?.state || ''})
+                      </option>
+                    ) : (
+                      branches.map(b => (
+                        <option key={b.id} value={b.id}>{b.name} ({b.state})</option>
+                      ))
+                    )}
                   </select>
+                  {isBranchScoped && (
+                    <p className="text-[10px] text-slate-400 mt-1">Locked to your assigned branch.</p>
+                  )}
                 </div>
 
                 {/* Official Title */}
@@ -798,37 +809,40 @@ export const UserManagementView: React.FC = () => {
                   />
                 </div>
 
-                {/* Photo URL & Quick Presets */}
+                {/* Photo Upload from Device */}
                 <div className="sm:col-span-2">
                   <label className="block font-semibold text-slate-700 mb-1">
-                    Profile Photograph URL:
+                    Profile Photograph (Upload from Device):
                   </label>
                   <div className="flex items-center space-x-3">
-                    <img
-                      src={createForm.photoUrl}
-                      alt="Preview"
-                      className="w-10 h-10 rounded-full object-cover border border-slate-200 shrink-0"
-                    />
-                    <input
-                      type="url"
-                      value={createForm.photoUrl}
-                      onChange={e => setCreateForm({ ...createForm, photoUrl: e.target.value })}
-                      placeholder="https://..."
-                      className="flex-1 p-2.5 rounded-lg border border-slate-300 text-xs font-mono focus:outline-hidden focus:border-amber-600"
-                    />
-                  </div>
-                  <div className="flex flex-wrap gap-1.5 mt-2">
-                    <span className="text-[10px] text-slate-400 mr-1 self-center">Presets:</span>
-                    {photoPresets.map((p, idx) => (
-                      <button
-                        key={idx}
-                        type="button"
-                        onClick={() => setCreateForm({ ...createForm, photoUrl: p.url })}
-                        className="px-2 py-0.5 bg-slate-100 hover:bg-amber-50 text-[10px] rounded border border-slate-200 text-slate-700"
-                      >
-                        {p.label}
-                      </button>
-                    ))}
+                    {createForm.photoUrl ? (
+                      <img
+                        src={createForm.photoUrl}
+                        alt="Preview"
+                        className="w-12 h-12 rounded-full object-cover border border-slate-200 shrink-0"
+                      />
+                    ) : (
+                      <div className="w-12 h-12 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center shrink-0">
+                        <Camera className="w-5 h-5 text-slate-400" />
+                      </div>
+                    )}
+                    <div className="flex-1">
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={e => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          const reader = new FileReader();
+                          reader.onload = () => {
+                            setCreateForm({ ...createForm, photoUrl: reader.result as string });
+                          };
+                          reader.readAsDataURL(file);
+                        }}
+                        className="w-full text-xs file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-amber-100 file:text-amber-800 file:font-semibold file:cursor-pointer"
+                      />
+                      <p className="text-[10px] text-slate-400 mt-1">Select a photo from your computer or device. No web URLs.</p>
+                    </div>
                   </div>
                 </div>
 
@@ -978,7 +992,7 @@ export const UserManagementView: React.FC = () => {
                     Assigned Role: *
                   </label>
                   <select
-                    disabled={selectedUser.role === 'PRINCIPAL_PARTNER'}
+                    disabled={selectedUser.role === 'PRINCIPAL_PARTNER' || isAdminSecretary}
                     value={editForm.role}
                     onChange={e => setEditForm({ ...editForm, role: e.target.value as UserRole })}
                     className="w-full p-2.5 rounded-lg border border-slate-300 font-semibold text-slate-800 text-xs focus:outline-hidden focus:border-amber-600 disabled:bg-slate-100"
@@ -1001,11 +1015,18 @@ export const UserManagementView: React.FC = () => {
                   <select
                     value={editForm.branchId}
                     onChange={e => setEditForm({ ...editForm, branchId: e.target.value })}
-                    className="w-full p-2.5 rounded-lg border border-slate-300 text-xs focus:outline-hidden focus:border-amber-600"
+                    disabled={isBranchScoped}
+                    className="w-full p-2.5 rounded-lg border border-slate-300 text-xs focus:outline-hidden focus:border-amber-600 disabled:bg-slate-100 disabled:cursor-not-allowed"
                   >
-                    {branches.map(b => (
-                      <option key={b.id} value={b.id}>{b.name} ({b.state})</option>
-                    ))}
+                    {isBranchScoped ? (
+                      <option value={userBranchId}>
+                        {branches.find(b => b.id === userBranchId)?.name || 'Your Branch'} ({branches.find(b => b.id === userBranchId)?.state || ''})
+                      </option>
+                    ) : (
+                      branches.map(b => (
+                        <option key={b.id} value={b.id}>{b.name} ({b.state})</option>
+                      ))
+                    )}
                   </select>
                 </div>
 
@@ -1072,36 +1093,40 @@ export const UserManagementView: React.FC = () => {
                   />
                 </div>
 
-                {/* Photo URL */}
+                {/* Photo Upload from Device */}
                 <div className="sm:col-span-2">
                   <label className="block font-semibold text-slate-700 mb-1">
-                    Profile Photo URL:
+                    Profile Photograph (Upload from Device):
                   </label>
                   <div className="flex items-center space-x-3">
-                    <img
-                      src={editForm.photoUrl}
-                      alt="Preview"
-                      className="w-10 h-10 rounded-full object-cover border border-slate-200 shrink-0"
-                    />
-                    <input
-                      type="url"
-                      value={editForm.photoUrl}
-                      onChange={e => setEditForm({ ...editForm, photoUrl: e.target.value })}
-                      className="flex-1 p-2.5 rounded-lg border border-slate-300 text-xs font-mono focus:outline-hidden focus:border-amber-600"
-                    />
-                  </div>
-                  <div className="flex flex-wrap gap-1.5 mt-2">
-                    <span className="text-[10px] text-slate-400 mr-1 self-center">Presets:</span>
-                    {photoPresets.map((p, idx) => (
-                      <button
-                        key={idx}
-                        type="button"
-                        onClick={() => setEditForm({ ...editForm, photoUrl: p.url })}
-                        className="px-2 py-0.5 bg-slate-100 hover:bg-amber-50 text-[10px] rounded border border-slate-200 text-slate-700"
-                      >
-                        {p.label}
-                      </button>
-                    ))}
+                    {editForm.photoUrl ? (
+                      <img
+                        src={editForm.photoUrl}
+                        alt="Preview"
+                        className="w-12 h-12 rounded-full object-cover border border-slate-200 shrink-0"
+                      />
+                    ) : (
+                      <div className="w-12 h-12 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center shrink-0">
+                        <Camera className="w-5 h-5 text-slate-400" />
+                      </div>
+                    )}
+                    <div className="flex-1">
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={e => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          const reader = new FileReader();
+                          reader.onload = () => {
+                            setEditForm({ ...editForm, photoUrl: reader.result as string });
+                          };
+                          reader.readAsDataURL(file);
+                        }}
+                        className="w-full text-xs file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-amber-100 file:text-amber-800 file:font-semibold file:cursor-pointer"
+                      />
+                      <p className="text-[10px] text-slate-400 mt-1">Select a photo from your computer or device. No web URLs.</p>
+                    </div>
                   </div>
                 </div>
 

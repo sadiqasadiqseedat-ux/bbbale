@@ -8,8 +8,10 @@ import {
   Tenancy, 
   Consultation, 
   StudentProfile, 
-  CourtDiaryEntry 
+  CourtDiaryEntry,
+  QuitNotice 
 } from '../../types';
+import { storageService } from '../../services/storage';
 import { Scale, Printer, Download, X } from 'lucide-react';
 
 export type PrintableDocumentType =
@@ -20,7 +22,8 @@ export type PrintableDocumentType =
   | { type: 'TENANT_RECORD'; data: Tenant; tenancy?: Tenancy }
   | { type: 'CONSULTATION_SLIP'; data: Consultation }
   | { type: 'INTERNSHIP_RECORD'; data: StudentProfile }
-  | { type: 'COURT_DIARY_REPORT'; data: CourtDiaryEntry[] };
+  | { type: 'COURT_DIARY_REPORT'; data: CourtDiaryEntry[] }
+  | { type: 'QUIT_NOTICE'; data: QuitNotice };
 
 interface PrintDocumentProps {
   document: PrintableDocumentType;
@@ -69,9 +72,10 @@ export const PrintDocumentModal: React.FC<PrintDocumentProps> = ({ document, onC
               </div>
               <div>
                 <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Payment Instructions:</h4>
-                <p className="text-xs text-slate-700">Bank: <span className="font-semibold">First Bank of Nigeria PLC</span></p>
-                <p className="text-xs text-slate-700">Account Name: <span className="font-semibold">B. B. BALE & CO. (CLIENT SERVICES)</span></p>
-                <p className="text-xs text-slate-700">Account Number: <span className="font-mono font-semibold">2039485712</span></p>
+                <p className="text-xs text-slate-700">Bank: <span className="font-semibold">{storageService.getWebsiteContent().invoiceBankName}</span></p>
+                <p className="text-xs text-slate-700">Account Name: <span className="font-semibold">{storageService.getWebsiteContent().invoiceAccountName}</span></p>
+                <p className="text-xs text-slate-700">Account Number: <span className="font-mono font-semibold">{storageService.getWebsiteContent().invoiceAccountNumber}</span></p>
+                <p className="text-xs text-slate-700">Payment Method: <span className="font-semibold">{storageService.getWebsiteContent().invoicePaymentMethod}</span></p>
                 <p className="text-xs font-mono text-amber-900 mt-2 bg-amber-50 p-1.5 border border-amber-200 rounded">
                   Mandatory Payment Reference: <span className="font-bold">{inv.paymentReference}</span>
                 </p>
@@ -416,6 +420,68 @@ export const PrintDocumentModal: React.FC<PrintDocumentProps> = ({ document, onC
                 ))}
               </tbody>
             </table>
+          </div>
+        );
+      }
+
+      case 'QUIT_NOTICE': {
+        const qn = document.data;
+        return (
+          <div className="space-y-6">
+            <div className="border-b border-slate-200 pb-4 flex justify-between items-end">
+              <div>
+                <span className="text-xs font-semibold tracking-wider text-red-700 uppercase">Statutory Notice</span>
+                <h2 className="text-2xl font-serif font-bold text-slate-900 uppercase">{qn.noticeType}</h2>
+                <p className="text-sm text-slate-500 font-mono">Notice Ref: {qn.quitNoticeId}</p>
+              </div>
+              <div className="text-right">
+                <p className="text-sm font-semibold text-slate-900">Date Issued: {qn.noticeDate}</p>
+                <p className="text-sm font-semibold text-red-700">Notice Expires: {qn.noticeExpiryDate}</p>
+                <span className="inline-block mt-1 text-xs font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-800">
+                  STATUS: {qn.status}
+                </span>
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-50 rounded-lg border border-slate-200 space-y-3 text-sm">
+              <div>
+                <h4 className="text-xs font-bold text-slate-500 uppercase mb-1">To (Tenant):</h4>
+                <p className="font-semibold text-slate-900 text-base">{qn.tenantName}</p>
+                <p className="text-slate-600">Unit {qn.unitNumber}, {qn.propertyName}</p>
+              </div>
+              <div className="pt-2 border-t border-slate-200">
+                <h4 className="text-xs font-bold text-slate-500 uppercase mb-1">From (Landlord / Owner):</h4>
+                <p className="font-semibold text-slate-900">{qn.landlordName}</p>
+                <p className="text-slate-600">c/o B. B. Bale & Co. Chambers</p>
+              </div>
+            </div>
+
+            <div className="space-y-3 text-sm">
+              <p className="font-semibold text-slate-900 uppercase tracking-wide">Take Notice:</p>
+              <p className="text-slate-800 leading-relaxed">
+                Pursuant to the applicable Recovery of Premises Laws and Tenancy Laws of the relevant State,
+                the Landlord hereby gives you <strong>{qn.noticeType}</strong> to quit and deliver up possession
+                of the demised premises known as <strong>Unit {qn.unitNumber}, {qn.propertyName}</strong>.
+              </p>
+              <p className="text-slate-800 leading-relaxed">
+                This notice takes effect from <strong>{qn.noticeDate}</strong> and expires on{' '}
+                <strong>{qn.noticeExpiryDate}</strong>, after which the Landlord shall be entitled to
+                commence proceedings for the recovery of possession of the said premises.
+              </p>
+              <div className="p-3 bg-red-50 border border-red-200 rounded">
+                <p className="text-xs font-bold text-red-800 uppercase mb-1">Ground(s) for Notice:</p>
+                <p className="text-slate-800">{qn.reason}</p>
+              </div>
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded">
+                <p className="text-xs font-bold text-slate-600 uppercase mb-1">Statutory Basis:</p>
+                <p className="text-slate-700 text-xs">{qn.statutoryBasis}</p>
+              </div>
+            </div>
+
+            <div className="text-xs text-slate-500 border-t border-slate-200 pt-3">
+              <p>Issued by: <span className="font-semibold text-slate-700">{qn.issuedByName}</span></p>
+              <p className="text-[10px] text-slate-400 mt-1">This is a formal legal document issued by B. B. Bale & Co. Chambers on behalf of the Landlord.</p>
+            </div>
           </div>
         );
       }

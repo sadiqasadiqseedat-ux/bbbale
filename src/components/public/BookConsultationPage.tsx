@@ -181,9 +181,10 @@ export const BookConsultationPage: React.FC<BookConsultationPageProps> = ({ onNa
             </div>
             <div>
               <p className="font-bold text-slate-500 uppercase">Payment Settlement Instructions:</p>
-              <p className="text-slate-800 font-medium mt-1">Bank Name: First Bank of Nigeria PLC</p>
-              <p className="text-slate-800 font-medium">Account Name: B. B. BALE & CO. (CLIENT SERVICES)</p>
-              <p className="text-slate-800 font-medium">Account Number: 2039485712</p>
+              <p className="text-slate-800 font-medium mt-1">Bank Name: {storageService.getWebsiteContent().invoiceBankName}</p>
+              <p className="text-slate-800 font-medium">Account Name: {storageService.getWebsiteContent().invoiceAccountName}</p>
+              <p className="text-slate-800 font-medium">Account Number: {storageService.getWebsiteContent().invoiceAccountNumber}</p>
+              <p className="text-slate-800 font-medium">Payment Method: {storageService.getWebsiteContent().invoicePaymentMethod}</p>
               <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded">
                 <p className="text-[11px] text-amber-900 font-semibold">
                   Required Payment Narration: <span className="font-mono">{completedData.paymentRef}</span>
