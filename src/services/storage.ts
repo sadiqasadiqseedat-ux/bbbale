@@ -862,6 +862,8 @@ export const storageService = {
     bio: string;
     photoUrl: string;
     initialPassword?: string;
+    isPubliclyVisible?: boolean;
+    requiresPasswordChange?: boolean;
   }, actor: User): Promise<{ success: boolean; user?: User; error?: string }> => {
     // Validate authority: Only Principal Partner or Head of Chamber
     if (actor.role !== 'PRINCIPAL_PARTNER' && actor.role !== 'HEAD_OF_CHAMBER') {
@@ -900,12 +902,12 @@ export const storageService = {
       bio: data.bio,
       photoUrl: data.photoUrl || '',
       availability: 'AVAILABLE',
-      isPubliclyVisible: data.role === 'COUNSEL_STAFF' || data.role === 'HEAD_OF_CHAMBER' || data.role === 'PRINCIPAL_PARTNER',
+      isPubliclyVisible: data.isPubliclyVisible ?? (data.role === 'COUNSEL_STAFF' || data.role === 'HEAD_OF_CHAMBER' || data.role === 'PRINCIPAL_PARTNER'),
       isActive: true,
       accountStatus: 'Active',
       salt,
       passwordHash: hash,
-      requiresPasswordChange: true,
+      requiresPasswordChange: data.requiresPasswordChange ?? true,
       failedLoginAttempts: 0,
       createdAt: new Date().toISOString()
     };
@@ -947,6 +949,11 @@ export const storageService = {
     // Head of Chamber cannot promote anyone to Principal Partner
     if (updatedUser.role === 'PRINCIPAL_PARTNER' && actor.role !== 'PRINCIPAL_PARTNER') {
       return { success: false, error: 'Unauthorized: Only the Principal Partner can assign the Principal Partner role.' };
+    }
+
+    // Administrator / Secretary cannot change user roles
+    if (actor.role === 'ADMINISTRATOR_SECRETARY' && updatedUser.role !== existing.role) {
+      return { success: false, error: 'Unauthorized: Administrator / Secretary cannot modify user role assignments.' };
     }
 
     const sanitizedUser: User = {

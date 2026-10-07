@@ -31,6 +31,12 @@ import { User, UserRole, AvailabilityStatus, AccountStatus, Branch } from '../..
 export const UserManagementView: React.FC = () => {
   const { currentUser, isPrincipalPartner, isHeadOfChamber, isAdminSecretary } = useAuth();
 
+  // Derived values — must be declared BEFORE any state that references them
+  const userBranchId = currentUser?.branchId || 'br-abuja-01';
+  const isBranchScoped = !isPrincipalPartner;
+  const canManage = isPrincipalPartner || isHeadOfChamber || isAdminSecretary;
+  const canCreateUsers = isPrincipalPartner || isHeadOfChamber;
+
   const [users, setUsers] = useState<User[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -114,12 +120,6 @@ export const UserManagementView: React.FC = () => {
     return matchesSearch && matchesRole && matchesStatus && matchesBranch;
   });
 
-  // Check if current user is authorized to manage users
-  const canManage = isPrincipalPartner || isHeadOfChamber || isAdminSecretary;
-  // Non-Principal Partner users are scoped to their own branch only
-  const isBranchScoped = !isPrincipalPartner;
-  const userBranchId = currentUser?.branchId || 'br-abuja-01';
-
   if (!canManage) {
     return (
       <div className="bg-red-50 border border-red-200 rounded-xl p-8 text-center space-y-3">
@@ -162,7 +162,9 @@ export const UserManagementView: React.FC = () => {
       practiceAreas: createForm.practiceAreas.split(',').map(s => s.trim()).filter(Boolean),
       bio: createForm.bio.trim() || 'Legal Practitioner at B. B. BALE & CO. CHAMBERS.',
       photoUrl: createForm.photoUrl.trim(),
-      initialPassword: createForm.initialPassword.trim() || 'Chambers@2026!'
+      initialPassword: createForm.initialPassword.trim() || 'Chambers@2026!',
+      isPubliclyVisible: createForm.isPubliclyVisible,
+      requiresPasswordChange: createForm.requirePasswordChange
     }, currentUser);
 
     if (res.success && res.user) {
@@ -342,16 +344,18 @@ export const UserManagementView: React.FC = () => {
           </p>
         </div>
 
-        <button
-          onClick={() => {
-            setFormError('');
-            setIsCreateOpen(true);
-          }}
-          className="px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold shadow-xs flex items-center space-x-2 transition-colors shrink-0"
-        >
-          <UserPlus className="w-4 h-4" />
-          <span>Provision New User Account</span>
-        </button>
+        {canCreateUsers && (
+          <button
+            onClick={() => {
+              setFormError('');
+              setIsCreateOpen(true);
+            }}
+            className="px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold shadow-xs flex items-center space-x-2 transition-colors shrink-0"
+          >
+            <UserPlus className="w-4 h-4" />
+            <span>Provision New User Account</span>
+          </button>
+        )}
       </div>
 
       {/* KPI Stats */}
@@ -988,7 +992,7 @@ export const UserManagementView: React.FC = () => {
                     Assigned Role: *
                   </label>
                   <select
-                    disabled={selectedUser.role === 'PRINCIPAL_PARTNER'}
+                    disabled={selectedUser.role === 'PRINCIPAL_PARTNER' || isAdminSecretary}
                     value={editForm.role}
                     onChange={e => setEditForm({ ...editForm, role: e.target.value as UserRole })}
                     className="w-full p-2.5 rounded-lg border border-slate-300 font-semibold text-slate-800 text-xs focus:outline-hidden focus:border-amber-600 disabled:bg-slate-100"
