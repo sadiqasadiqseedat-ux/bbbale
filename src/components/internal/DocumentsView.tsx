@@ -9,7 +9,9 @@ import {
   Filter, 
   Plus, 
   CheckCircle2, 
-  Tag 
+  Tag,
+  Cloud,
+  ExternalLink
 } from 'lucide-react';
 import { storageService, subscribeToStore } from '../../services/storage';
 import { useAuth } from '../../context/AuthContext';
@@ -50,12 +52,14 @@ export const DocumentsView: React.FC = () => {
     category: 'Pleadings' as DocumentRecord['category'],
     version: '1.0',
     notes: '',
-    fileName: 'Originating_Summons_Filed.pdf',
-    isClientVisible: false
+    fileName: '',
+    isClientVisible: false,
+    googleDriveLink: ''
   });
 
   // Selected document preview modal
   const [previewDoc, setPreviewDoc] = useState<DocumentRecord | null>(null);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const loadData = () => {
     setDocuments(storageService.getDocuments());
@@ -76,10 +80,11 @@ export const DocumentsView: React.FC = () => {
       title: docForm.title,
       category: docForm.category,
       version: docForm.version,
-      fileType: 'PDF Document',
-      fileSize: '1.8 MB',
+      fileType: fileInputRef.current?.files?.[0]?.type || 'Document',
+      fileSize: fileInputRef.current?.files?.[0] ? `${(fileInputRef.current.files[0].size / 1024 / 1024).toFixed(1)} MB` : '',
       isClientVisible: docForm.isClientVisible,
-      notes: docForm.notes
+      notes: docForm.notes,
+      googleDriveLink: docForm.googleDriveLink.trim() || undefined
     }, currentUser);
 
     setIsUploadModalOpen(false);
@@ -89,7 +94,8 @@ export const DocumentsView: React.FC = () => {
       version: '1.0',
       notes: '',
       fileName: '',
-      isClientVisible: false
+      isClientVisible: false,
+      googleDriveLink: ''
     });
   };
 
@@ -119,6 +125,18 @@ export const DocumentsView: React.FC = () => {
           <Upload className="w-4 h-4" />
           <span>Deposit / Upload Legal Document</span>
         </button>
+      </div>
+
+      {/* Google Drive Sync Info Banner */}
+      <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl text-xs text-blue-950 space-y-1 flex items-start space-x-3">
+        <Cloud className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
+        <div>
+          <p className="font-bold text-blue-900 uppercase font-serif">Google Drive Document Sync</p>
+          <p>
+            All legal documents and deposits should be uploaded to Google Drive for secure cloud backup, data loss prevention, and local storage conservation.
+            Paste the Google Drive share link in the upload form below. The link is stored with the document record for easy retrieval and syncing.
+          </p>
+        </div>
       </div>
 
       {/* Filter and Search Bar */}
@@ -253,12 +271,33 @@ export const DocumentsView: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">File Upload (Select file):</label>
+                  <label className="block font-semibold text-slate-700 mb-1">Upload File from Device:</label>
                   <input
+                    ref={fileInputRef}
                     type="file"
-                    className="text-xs file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:bg-slate-100"
+                    className="text-xs file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:bg-slate-100 w-full"
                   />
                 </div>
+              </div>
+
+              {/* Google Drive Link */}
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Google Drive Share Link (Recommended for Sync & Backup):
+                </label>
+                <div className="flex items-center space-x-2">
+                  <Cloud className="w-4 h-4 text-blue-500 shrink-0" />
+                  <input
+                    type="url"
+                    value={docForm.googleDriveLink}
+                    onChange={e => setDocForm({ ...docForm, googleDriveLink: e.target.value })}
+                    placeholder="https://drive.google.com/file/d/..."
+                    className="flex-1 p-2.5 rounded border border-slate-300 text-xs font-mono"
+                  />
+                </div>
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Upload the document to Google Drive first, then paste the share link here for cloud backup and sync.
+                </p>
               </div>
 
               <div>
@@ -327,9 +366,34 @@ export const DocumentsView: React.FC = () => {
                   <p className="text-slate-700 leading-relaxed">{previewDoc.notes}</p>
                 </div>
               )}
+              {previewDoc.googleDriveLink && (
+                <div className="pt-2 border-t border-slate-200">
+                  <span className="text-slate-500 font-bold block mb-1">Google Drive Sync Link:</span>
+                  <a
+                    href={previewDoc.googleDriveLink}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center space-x-1 text-blue-600 hover:text-blue-800 font-medium break-all"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5 shrink-0" />
+                    <span className="break-all">{previewDoc.googleDriveLink}</span>
+                  </a>
+                </div>
+              )}
             </div>
 
             <div className="flex justify-end space-x-2 pt-2 border-t">
+              {previewDoc.googleDriveLink && (
+                <a
+                  href={previewDoc.googleDriveLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-bold flex items-center space-x-1.5"
+                >
+                  <Cloud className="w-4 h-4" />
+                  <span>Open in Google Drive</span>
+                </a>
+              )}
               <button
                 onClick={() => {
                   alert(`Downloading ${previewDoc.title} (${previewDoc.documentId})...`);

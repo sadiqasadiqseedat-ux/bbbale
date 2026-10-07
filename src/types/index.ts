@@ -258,6 +258,7 @@ export interface DocumentRecord {
   uploadDate: string;
   isClientVisible: boolean;
   notes?: string;
+  googleDriveLink?: string;
 }
 
 export interface Correspondence {
@@ -372,6 +373,7 @@ export interface Tenant {
   fullName: string;
   phone: string;
   email: string;
+  landlordId: string;
   propertyId: string;
   unitNumber: string;
   trackingCode: string;
@@ -435,6 +437,27 @@ export interface PropertyDispute {
   suitNumber?: string;
   statusSummary: string;
   counselNotes: string;
+  createdAt: string;
+}
+
+export interface QuitNotice {
+  id: string;
+  quitNoticeId: string;
+  tenantId: string;
+  tenantName: string;
+  propertyId: string;
+  propertyName: string;
+  landlordId: string;
+  landlordName: string;
+  unitNumber: string;
+  noticeType: 'Quit Notice' | "Owner's Intention to Recover Possession" | 'Notice to Quit';
+  noticeDate: string;
+  noticeExpiryDate: string;
+  reason: string;
+  statutoryBasis: string;
+  status: 'Issued' | 'Served' | 'Expired' | 'Complied With' | 'Disputed';
+  issuedById: string;
+  issuedByName: string;
   createdAt: string;
 }
 

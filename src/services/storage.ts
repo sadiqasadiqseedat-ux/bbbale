@@ -34,7 +34,8 @@ import {
   AuditLog,
   UserRole,
   UserSession,
-  WebsiteContent
+  WebsiteContent,
+  QuitNotice
 } from '../types';
 import { 
   generateSalt, 
@@ -406,6 +407,7 @@ const STORAGE_KEYS = {
   TENANCIES: 'bb_tenancies_v1',
   RENT_RECORDS: 'bb_rent_records_v1',
   PROPERTY_DISPUTES: 'bb_property_disputes_v1',
+  QUIT_NOTICES: 'bb_quit_notices_v1',
   INVOICES: 'bb_invoices_v1',
   PAYMENTS: 'bb_payments_v1',
   EXPENSES: 'bb_expenses_v1',
@@ -896,7 +898,7 @@ export const storageService = {
       title: data.title,
       practiceAreas: data.practiceAreas,
       bio: data.bio,
-      photoUrl: data.photoUrl || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=600',
+      photoUrl: data.photoUrl || '',
       availability: 'AVAILABLE',
       isPubliclyVisible: data.role === 'COUNSEL_STAFF' || data.role === 'HEAD_OF_CHAMBER' || data.role === 'PRINCIPAL_PARTNER',
       isActive: true,
@@ -1743,6 +1745,100 @@ export const storageService = {
     const list = storageService.getPropertyDisputes().map(d => d.id === dispute.id ? dispute : d);
     setToStorage(STORAGE_KEYS.PROPERTY_DISPUTES, list);
     logAudit(actor, 'UPDATE_PREMISES_RECOVERY', 'PropertyDispute', dispute.id, `Stage updated to: ${dispute.workflowStage}`);
+  },
+
+  // Quit Notices
+  getQuitNotices: (): QuitNotice[] => getFromStorage<QuitNotice[]>(STORAGE_KEYS.QUIT_NOTICES, []),
+  issueQuitNotice: (data: {
+    tenantId: string;
+    tenantName: string;
+    propertyId: string;
+    propertyName: string;
+    landlordId: string;
+    landlordName: string;
+    unitNumber: string;
+    noticeType: QuitNotice['noticeType'];
+    noticeDate: string;
+    noticeExpiryDate: string;
+    reason: string;
+    statutoryBasis: string;
+  }, actor: User): QuitNotice => {
+    const list = storageService.getQuitNotices();
+    const quitNoticeId = getNextNumber('quit_notice', 'QNT');
+    const newNotice: QuitNotice = {
+      ...data,
+      id: `qn-${Date.now()}`,
+      quitNoticeId,
+      status: 'Issued',
+      issuedById: actor.id,
+      issuedByName: actor.name,
+      createdAt: new Date().toISOString()
+    };
+    setToStorage(STORAGE_KEYS.QUIT_NOTICES, [newNotice, ...list]);
+    logAudit(actor, 'ISSUE_QUIT_NOTICE', 'QuitNotice', newNotice.id, `Issued ${data.noticeType} to ${data.tenantName} for unit ${data.unitNumber} at ${data.propertyName}`);
+
+    // Update tenant status to reflect quit notice
+    const tenants = storageService.getTenants().map(t => {
+      if (t.id === data.tenantId) {
+        return { ...t, status: 'Terminated' as const };
+      }
+      return t;
+    });
+    setToStorage(STORAGE_KEYS.TENANTS, tenants);
+
+    dispatchNotification(
+      'Quit Notice Issued',
+      `${data.noticeType} issued to ${data.tenantName} (Unit ${data.unitNumber}, ${data.propertyName}). Expiry: ${data.noticeExpiryDate}.`,
+      'urgent',
+      'HEAD_OF_CHAMBER'
+    );
+
+    return newNotice;
+  },
+  updateQuitNoticeStatus: (id: string, status: QuitNotice['status'], actor: User): void => {
+    const list = storageService.getQuitNotices().map(q => q.id === id ? { ...q, status } : q);
+    setToStorage(STORAGE_KEYS.QUIT_NOTICES, list);
+    logAudit(actor, 'UPDATE_QUIT_NOTICE', 'QuitNotice', id, `Quit notice status updated to: ${status}`);
+  },
+
+  // Rent Due Notification Check — generates notifications 30 days before tenancy expiry
+  checkRentDueNotifications: (): void => {
+    const tenancies = storageService.getTenancies();
+    const tenants = storageService.getTenants();
+    const properties = storageService.getProperties();
+    const existingNotifs = storageService.getNotifications();
+    const now = new Date();
+    const thirtyDaysFromNow = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+    tenancies.forEach(tenancy => {
+      if (tenancy.status === 'Terminated' || tenancy.status === 'Expired') return;
+
+      const expiryDate = new Date(tenancy.expiryDate);
+      const daysUntilExpiry = Math.ceil((expiryDate.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
+
+      // Only notify if within 30 days of due date and not already notified
+      if (daysUntilExpiry <= 30 && daysUntilExpiry >= 0) {
+        const tenant = tenants.find(t => t.id === tenancy.tenantId);
+        const property = properties.find(p => p.id === tenancy.propertyId);
+        const notifKey = `rent-due-${tenancy.id}-${tenancy.expiryDate}`;
+
+        // Check if notification already exists for this tenancy/expiry
+        const alreadyNotified = existingNotifs.some(n =>
+          n.linkAction === notifKey
+        );
+
+        if (!alreadyNotified) {
+          dispatchNotification(
+            'Rent Payment Due Soon',
+            `Tenancy for ${tenant?.fullName || 'Tenant'} at ${property?.name || 'Property'} (Unit ${tenancy.unitNumber}) expires on ${tenancy.expiryDate}. Rent of ₦${tenancy.rentAmount.toLocaleString()} is due in ${daysUntilExpiry} day(s). Please arrange payment.`,
+            'warning',
+            undefined,
+            undefined,
+            notifKey
+          );
+        }
+      }
+    });
   },
 
   // Institutions & Students & Internships

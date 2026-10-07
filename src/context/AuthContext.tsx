@@ -179,7 +179,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Account Officer: Authorized billing & financial verification
   // Counsel / Staff: Assigned cases, tasks, court dates, availability
   const canManageFirm = isPrincipalPartner;
-  const canManageUsers = isPrincipalPartner || isHeadOfChamber;
+  const canManageUsers = isPrincipalPartner || isHeadOfChamber || isAdminSecretary;
   const canManageWebsite = isPrincipalPartner || isHeadOfChamber || isAdminSecretary;
   const canAssignCases = isPrincipalPartner || isHeadOfChamber;
   const canVerifyPayments = isAccountOfficer || isAdminSecretary;
