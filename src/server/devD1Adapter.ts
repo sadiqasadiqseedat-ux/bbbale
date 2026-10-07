@@ -18,11 +18,16 @@ export function createDevD1Database(dbFilePath: string = './.base44/chambers_d1_
     const sqlite = new DatabaseSync(dbFilePath);
     sqlite.exec('PRAGMA foreign_keys = OFF;');
 
-    // Apply schema immediately if needed
-    const schemaFile = path.resolve(process.cwd(), 'migrations/0001_initial_schema.sql');
-    if (fs.existsSync(schemaFile)) {
-      const schemaSql = fs.readFileSync(schemaFile, 'utf-8');
-      sqlite.exec(schemaSql);
+    // Apply every migration in order (mirrors `wrangler d1 migrations apply`)
+    const migrationsDir = path.resolve(process.cwd(), 'migrations');
+    if (fs.existsSync(migrationsDir)) {
+      const migrationFiles = fs.readdirSync(migrationsDir)
+        .filter((f) => f.endsWith('.sql'))
+        .sort();
+      for (const file of migrationFiles) {
+        const migrationSql = fs.readFileSync(path.join(migrationsDir, file), 'utf-8');
+        sqlite.exec(migrationSql);
+      }
     }
 
     return {

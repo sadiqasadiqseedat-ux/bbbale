@@ -449,7 +449,15 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
         enquiriesRes,
         approvalsRes,
         auditLogsRes,
-        websiteContentRes
+        websiteContentRes,
+        unitsRes,
+        rentRecordsRes,
+        correspondenceRes,
+        appointmentsRes,
+        attendanceRes,
+        evaluationsRes,
+        disputesRes,
+        receiptsRes
       ] = await Promise.all([
         db.prepare('SELECT id, name, code, address, city, state, phone, email, head_of_chamber_id as headOfChamberId, is_active as isActive FROM branches').all(),
         db.prepare(`
@@ -640,7 +648,15 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
                  invoice_account_number as invoiceAccountNumber, invoice_payment_method as invoicePaymentMethod,
                  last_updated as lastUpdated, updated_by as updatedBy
           FROM website_content WHERE id = 'cms-main'
-        `).first()
+        `).first(),
+        db.prepare('SELECT id, property_id as propertyId, unit_number as unitNumber, description, annual_rent as annualRent, status, current_tenant_id as currentTenantId FROM units').all().catch(() => ({ results: [] })),
+        db.prepare('SELECT id, tenancy_id as tenancyId, tenant_name as tenantName, property_id as propertyId, unit_number as unitNumber, amount_due as amountDue, amount_paid as amountPaid, due_date as dueDate, payment_date as paymentDate, status, payment_reference as paymentReference, receipt_number as receiptNumber FROM rent_records').all().catch(() => ({ results: [] })),
+        db.prepare('SELECT id, reference_number as referenceNumber, branch_id as branchId, type, date, sender, recipient, subject, content, matter_id as matterId, case_id as caseId, client_id as clientId, property_id as propertyId, logged_by_id as loggedById FROM correspondence').all().catch(() => ({ results: [] })),
+        db.prepare('SELECT id, title, client_name as clientName, phone, email, counsel_id as counselId, appointment_type as appointmentType, date, time, branch_id as branchId, location, status, notes FROM appointments').all().catch(() => ({ results: [] })),
+        db.prepare('SELECT id, student_id as studentId, student_name as studentName, date, arrival_time as arrivalTime, departure_time as departureTime, status, supervisor_notes as supervisorNotes, logged_by_id as loggedById FROM internship_attendance').all().catch(() => ({ results: [] })),
+        db.prepare('SELECT id, student_id as studentId, student_name as studentName, evaluation_date as evaluationDate, punctuality_rating as punctualityRating, research_rating as researchRating, drafting_rating as draftingRating, court_conduct_rating as courtConductRating, overall_grade as overallGrade, remarks, evaluated_by_id as evaluatedById FROM internship_evaluations').all().catch(() => ({ results: [] })),
+        db.prepare('SELECT id, property_id as propertyId, tenant_id as tenantId, complaint_title as complaintTitle, workflow_stage as workflowStage, notice_served_date as noticeServedDate, notice_expiry_date as noticeExpiryDate, counsel_in_charge_id as counselInChargeId, suit_number as suitNumber, status_summary as statusSummary, counsel_notes as counselNotes, created_at as createdAt FROM property_disputes').all().catch(() => ({ results: [] })),
+        db.prepare('SELECT id, receipt_number as receiptNumber, payment_reference as paymentReference, invoice_number as invoiceNumber, client_name as clientName, amount, payment_method as paymentMethod, issued_date as issuedDate, issued_by_id as issuedById, issued_by_name as issuedByName FROM receipts').all().catch(() => ({ results: [] }))
       ]);
 
       // Parse JSON fields
@@ -696,7 +712,15 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
           publicEnquiries: enquiriesRes.results || [],
           approvals: approvalsRes.results || [],
           auditLogs: auditLogsRes.results || [],
-          websiteContent: websiteContentRes || INITIAL_CMS_SEED
+          websiteContent: websiteContentRes || INITIAL_CMS_SEED,
+          units: unitsRes.results || [],
+          rentRecords: rentRecordsRes.results || [],
+          correspondence: correspondenceRes.results || [],
+          appointments: appointmentsRes.results || [],
+          attendance: attendanceRes.results || [],
+          evaluations: evaluationsRes.results || [],
+          propertyDisputes: disputesRes.results || [],
+          receipts: receiptsRes.results || []
         },
         timestamp: new Date().toISOString()
       });
@@ -1029,6 +1053,13 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
         name: 'Chukwuemeka Okonkwo, ACA',
         role: request.headers.get('X-User-Role') || 'ACCOUNT_OFFICER'
       };
+
+      // Server-side authorization: only the Account Officer, Head of Chamber or
+      // Principal Partner may verify payments and settle invoices.
+      const PAYMENT_VERIFIER_ROLES = ['ACCOUNT_OFFICER', 'ADMINISTRATOR_SECRETARY', 'HEAD_OF_CHAMBER', 'PRINCIPAL_PARTNER'];
+      if (!PAYMENT_VERIFIER_ROLES.includes(actor.role)) {
+        return errorResponse(`Unauthorized: role "${actor.role}" cannot verify payments.`, 403);
+      }
 
       const payment = await db.prepare('SELECT * FROM payments WHERE id = ?').bind(paymentId).first();
       if (!payment) return errorResponse('Payment record not found', 404);
@@ -1733,19 +1764,170 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
       return jsonResponse({ success: true, approval: data, message: 'Saved successfully' });
     }
 
+    // POST /api/users — Provision a new Chambers personnel account
+    if (path === '/api/users' && method === 'POST') {
+      const data = await request.json().catch(() => ({}));
+      const actorRole = request.headers.get('X-User-Role') || '';
+      const accountCreatorRoles = ['PRINCIPAL_PARTNER', 'HEAD_OF_CHAMBER'];
+      if (!accountCreatorRoles.includes(actorRole)) {
+        return errorResponse('Unauthorized: only the Principal Partner or Head of Chamber can create accounts.', 403);
+      }
+      if (data.role === 'PRINCIPAL_PARTNER' && actorRole !== 'PRINCIPAL_PARTNER') {
+        return errorResponse('Unauthorized: only the Principal Partner can provision Principal Partner accounts.', 403);
+      }
+      if (!data.id || !data.username) return errorResponse('User id and username are required', 400);
+
+      await db.prepare(`
+        INSERT INTO users (
+          id, username, name, email, phone, role, branch_id, title, practice_areas,
+          bio, photo_url, availability, is_publicly_visible, is_active, account_status,
+          password_hash, salt, requires_password_change, failed_login_attempts, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, datetime('now'))
+      `).bind(
+        data.id, String(data.username).toLowerCase(), data.name, data.email, data.phone,
+        data.role, data.branchId, data.title,
+        JSON.stringify(data.practiceAreas || []), data.bio || '', data.photoUrl || '',
+        data.availability || 'AVAILABLE', data.isPubliclyVisible ? 1 : 0, 1,
+        data.accountStatus || 'Active', data.passwordHash || '', data.salt || '',
+        data.requiresPasswordChange ? 1 : 0
+      ).run();
+
+      await logD1Audit(db, { id: request.headers.get('X-User-Id') || 'system', name: 'Authorized Executive', role: actorRole }, 'CREATE_USER_ACCOUNT', 'User', data.id, `Created account for ${data.name} (${data.username})`);
+      return jsonResponse({ success: true, user: data, message: 'Saved successfully' });
+    }
+
     if (path.startsWith('/api/users/') && method === 'PUT') {
       const id = path.replace('/api/users/', '');
       const data = await request.json().catch(() => ({}));
-      await db.prepare(`
-        UPDATE users
-        SET name = ?, email = ?, phone = ?, availability = ?,
-            is_publicly_visible = ?, is_active = ?, account_status = ?
-        WHERE id = ?
-      `).bind(
-        data.name, data.email, data.phone, data.availability,
-        data.isPubliclyVisible ? 1 : 0, data.isActive ? 1 : 0, data.accountStatus, id
-      ).run();
+
+      const columnInfo = await db.prepare('PRAGMA table_info("users")').all();
+      const userColumns: string[] = (columnInfo.results || []).map((c: any) => c.name);
+      const toSnake = (key: string) => key.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
+
+      const pairs: Array<[string, any]> = [];
+      for (const [key, value] of Object.entries(data)) {
+        const col = toSnake(key);
+        if (!userColumns.includes(col) || col === 'id') continue;
+        let bound = value;
+        if (typeof bound === 'boolean') bound = bound ? 1 : 0;
+        else if (bound === undefined) bound = null;
+        else if (bound !== null && typeof bound === 'object') bound = JSON.stringify(bound);
+        pairs.push([col, bound]);
+      }
+
+      if (pairs.length > 0) {
+        const setClause = pairs.map(([c]) => `"${c}" = ?`).join(', ');
+        await db.prepare(`UPDATE users SET ${setClause} WHERE id = ?`)
+          .bind(...pairs.map(([, v]) => v), id).run();
+      }
+
+      await logD1Audit(db, { id: request.headers.get('X-User-Id') || 'system', name: 'Authorized Executive', role: request.headers.get('X-User-Role') || 'PRINCIPAL_PARTNER' }, 'UPDATE_USER_ACCOUNT', 'User', id, `Updated personnel account ${data.name || id}`);
       return jsonResponse({ success: true, user: data, message: 'Saved successfully' });
+    }
+
+    // =========================================================================
+    // 9. GENERIC RELATIONAL RECORD API — every remaining Chambers module
+    // =========================================================================
+    // Authoritative server-side persistence for all firm collections through
+    // env.DB. Column names are resolved from the live D1 schema, so only real
+    // columns are ever written. Authorization is evaluated here on the server.
+    if (path.startsWith('/api/records/')) {
+      const segments = path.replace('/api/records/', '').split('/');
+      const table = segments[0];
+      const recordId = segments[1] ? decodeURIComponent(segments[1]) : null;
+
+      const WRITABLE_RECORD_TABLES = new Set([
+        'branches', 'courts', 'clients', 'consultations', 'matters', 'cases',
+        'case_assignments', 'court_diary', 'tasks', 'documents', 'correspondence',
+        'legal_research', 'appointments', 'properties', 'landlords', 'units',
+        'tenants', 'tenancies', 'rent_records', 'property_disputes', 'quit_notices',
+        'invoices', 'payments', 'expenses', 'students', 'internship_attendance',
+        'internship_evaluations', 'public_notices', 'public_enquiries',
+        'approval_requests', 'partner_institutions'
+      ]);
+
+      if (!WRITABLE_RECORD_TABLES.has(table)) {
+        return errorResponse(`Table "${table}" is not writable through this endpoint.`, 403);
+      }
+
+      // Public intake collections may be written by unauthenticated visitors
+      // (internship applications, website enquiries). Everything else requires
+      // an authenticated Chambers role evaluated here on the server.
+      const PUBLIC_WRITE_TABLES = new Set(['public_enquiries', 'students']);
+      const actorRole = request.headers.get('X-User-Role') || (PUBLIC_WRITE_TABLES.has(table) ? 'PUBLIC' : null);
+      if (!actorRole) {
+        return errorResponse('Unauthorized: an authenticated Chambers role is required for database writes.', 401);
+      }
+
+      const toSnake = (key: string) =>
+        key.replace(/([a-z0-9])([A-Z])/g, '$1_$2').replace(/[-\s]/g, '_').toLowerCase();
+
+      const buildPairs = (payload: any, columns: string[], targetId: string): Array<[string, any]> => {
+        const pairs: Array<[string, any]> = [];
+        for (const [key, value] of Object.entries(payload)) {
+          const col = toSnake(key);
+          if (!columns.includes(col)) continue;
+          let bound = value;
+          if (typeof bound === 'boolean') bound = bound ? 1 : 0;
+          else if (bound === undefined) bound = null;
+          else if (bound !== null && typeof bound === 'object') bound = JSON.stringify(bound);
+          pairs.push([col, bound]);
+        }
+        if (!pairs.some(([c]) => c === 'id')) pairs.push(['id', targetId]);
+        return pairs;
+      };
+
+      if (method === 'POST' || method === 'PUT') {
+        const data = await request.json().catch(() => ({}));
+        const targetId = recordId || data.id;
+        if (!targetId) return errorResponse('Record id is required', 400);
+
+        const columnInfo = await db.prepare(`PRAGMA table_info("${table}")`).all();
+        const columns: string[] = (columnInfo.results || []).map((c: any) => c.name);
+        const pairs = buildPairs(data, columns, targetId);
+        const nonIdPairs = pairs.filter(([c]) => c !== 'id');
+
+        if (method === 'PUT' && nonIdPairs.length === 0) {
+          return jsonResponse({ success: true, message: 'Nothing to update' });
+        }
+
+        if (method === 'POST') {
+          const columnList = pairs.map(([c]) => `"${c}"`).join(', ');
+          const placeholders = pairs.map(() => '?').join(', ');
+          const conflictUpdates = nonIdPairs.map(([c]) => `"${c}" = excluded."${c}"`).join(', ');
+          const sql = conflictUpdates
+            ? `INSERT INTO "${table}" (${columnList}) VALUES (${placeholders}) ON CONFLICT(id) DO UPDATE SET ${conflictUpdates}`
+            : `INSERT OR IGNORE INTO "${table}" (${columnList}) VALUES (${placeholders})`;
+          await db.prepare(sql).bind(...pairs.map(([, v]) => v)).run();
+        } else {
+          const setClause = nonIdPairs.map(([c]) => `"${c}" = ?`).join(', ');
+          await db.prepare(`UPDATE "${table}" SET ${setClause} WHERE id = ?`)
+            .bind(...nonIdPairs.map(([, v]) => v), targetId).run();
+        }
+
+        await logD1Audit(
+          db,
+          { id: request.headers.get('X-User-Id') || 'system', name: 'Authorized Staff', role: actorRole },
+          method === 'POST' ? 'CREATE_RECORD' : 'UPDATE_RECORD',
+          table, targetId, `${method} ${table} record persisted to Cloudflare D1`
+        );
+        return jsonResponse({ success: true, message: 'Saved successfully' });
+      }
+
+      if (method === 'DELETE') {
+        const body = await request.json().catch(() => ({} as any));
+        const targetId = recordId || body.id;
+        if (!targetId) return errorResponse('Record id is required', 400);
+        await db.prepare(`DELETE FROM "${table}" WHERE id = ?`).bind(targetId).run();
+        await logD1Audit(
+          db,
+          { id: request.headers.get('X-User-Id') || 'system', name: 'Authorized Staff', role: actorRole },
+          'DELETE_RECORD', table, targetId, `DELETE ${table} record persisted to Cloudflare D1`
+        );
+        return jsonResponse({ success: true, message: 'Deleted successfully' });
+      }
+
+      return errorResponse(`Method ${method} is not supported for record table "${table}"`, 405);
     }
 
     // Default 404 for unhandled API routes

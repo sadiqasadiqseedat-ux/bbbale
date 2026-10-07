@@ -520,7 +520,9 @@ export async function syncWithServer(): Promise<boolean> {
       matters, cases, caseAssignments, courtDiary, tasks, properties,
       landlords, tenants, tenancies, quitNotices, invoices, payments,
       expenses, students, legalResearch, documents, publicNotices,
-      publicEnquiries, approvals, auditLogs, websiteContent
+      publicEnquiries, approvals, auditLogs, websiteContent,
+      units, rentRecords, correspondence, appointments, attendance,
+      evaluations, propertyDisputes
     } = json.data;
 
     if (users && users.length > 0) localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
@@ -550,6 +552,13 @@ export async function syncWithServer(): Promise<boolean> {
     if (approvals) localStorage.setItem(STORAGE_KEYS.APPROVALS, JSON.stringify(approvals));
     if (auditLogs) localStorage.setItem(STORAGE_KEYS.AUDIT_LOGS, JSON.stringify(auditLogs));
     if (websiteContent) localStorage.setItem(STORAGE_KEYS.WEBSITE_CONTENT, JSON.stringify(websiteContent));
+    if (units) localStorage.setItem(STORAGE_KEYS.UNITS, JSON.stringify(units));
+    if (rentRecords) localStorage.setItem(STORAGE_KEYS.RENT_RECORDS, JSON.stringify(rentRecords));
+    if (correspondence) localStorage.setItem(STORAGE_KEYS.CORRESPONDENCE, JSON.stringify(correspondence));
+    if (appointments) localStorage.setItem(STORAGE_KEYS.APPOINTMENTS, JSON.stringify(appointments));
+    if (attendance) localStorage.setItem(STORAGE_KEYS.ATTENDANCE, JSON.stringify(attendance));
+    if (evaluations) localStorage.setItem(STORAGE_KEYS.EVALUATIONS, JSON.stringify(evaluations));
+    if (propertyDisputes) localStorage.setItem(STORAGE_KEYS.PROPERTY_DISPUTES, JSON.stringify(propertyDisputes));
 
     notifySubscribers();
     isSyncing = false;
@@ -726,6 +735,36 @@ async function persistToD1(endpoint: string, method: string, data: any, actor?: 
   }
 }
 
+// Generic D1 record persistence for every firm module (create / update / delete).
+// All writes travel to the server-side Worker / Pages Function, which reaches D1
+// through the env.DB binding — no Cloudflare credentials ever touch the browser.
+function persistRecord(table: string, method: 'POST' | 'PUT' | 'DELETE', data: any, actor?: User) {
+  setSaveState({ status: 'saving', message: 'Saving to Cloudflare D1...' });
+  const url = method === 'DELETE'
+    ? `/api/records/${table}/${encodeURIComponent(data.id)}`
+    : `/api/records/${table}`;
+
+  fetch(url, {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(actor ? { 'X-User-Id': actor.id, 'X-User-Role': actor.role } : {})
+    },
+    body: method === 'DELETE' ? undefined : JSON.stringify(data)
+  })
+    .then(async res => {
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || json.success === false) {
+        throw new Error(json.error || `HTTP ${res.status}`);
+      }
+      setSaveState({ status: 'saved', message: 'Saved successfully', lastSavedAt: new Date().toLocaleTimeString() });
+    })
+    .catch((err: any) => {
+      console.error(`D1 persistence failed for ${method} /api/records/${table}:`, err);
+      setSaveState({ status: 'error', message: 'Failed to save. Please try again.' });
+    });
+}
+
 // STORE REPOSITORY API
 export const storageService = {
   // Website Content Management (CMS)
@@ -742,6 +781,7 @@ export const storageService = {
     };
     setToStorage(STORAGE_KEYS.WEBSITE_CONTENT, updated);
     logAudit(actor, 'UPDATE_WEBSITE_CONTENT', 'WebsiteContent', 'cms-main', `Updated dynamic Chambers website content`);
+    persistToD1('/api/website-content', 'PUT', updated, actor).then(() => syncWithServer()).catch(() => {});
     return updated;
   },
 
@@ -787,6 +827,46 @@ export const storageService = {
     error?: string;
     requiresPasswordChange?: boolean;
   }> => {
+    // Authoritative server-side authentication against Cloudflare D1 (binding env.DB).
+    // Password hashes stay in the database and are never shipped to the browser.
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier, password, rememberMe })
+      });
+      const json = await res.json().catch(() => ({}));
+
+      if (res.ok && json.success && json.user && json.session) {
+        const cachedUsers = storageService.getUsers();
+        const mergedUsers = cachedUsers.some(u => u.id === json.user.id)
+          ? cachedUsers.map(u => (u.id === json.user.id ? { ...u, ...json.user } : u))
+          : [...cachedUsers, json.user];
+        setToStorage(STORAGE_KEYS.USERS, mergedUsers);
+
+        const session: UserSession = {
+          ...json.session,
+          lastActiveAt: new Date().toISOString()
+        };
+        setToStorage(STORAGE_KEYS.AUTH_SESSION, session);
+        syncWithServer();
+
+        return {
+          success: true,
+          user: json.user,
+          session,
+          requiresPasswordChange: Boolean(json.requiresPasswordChange)
+        };
+      }
+
+      if (res.status === 401 || res.status === 403) {
+        logAudit({ name: identifier }, 'FAILED_LOGIN_ATTEMPT', 'Session', identifier, `Login rejected by Cloudflare D1 for ${identifier}`);
+        return { success: false, error: json.error || 'Invalid username/email or password.' };
+      }
+    } catch (err) {
+      console.warn('Cloudflare D1 authentication unreachable; falling back to local verification.', err);
+    }
+
     const user = storageService.getUserByUsernameOrEmail(identifier);
     if (!user) {
       logAudit({ name: identifier }, 'FAILED_LOGIN_ATTEMPT', 'Session', identifier, `Failed login attempt: User not found`);
@@ -918,19 +998,49 @@ export const storageService = {
     const user = storageService.getUserById(userId);
     if (!user) return { success: false, error: 'User not found' };
 
-    // Verify current password
-    const isCurrentValid = await verifyPassword(currentPassword, user.salt, user.passwordHash);
-    if (!isCurrentValid) {
-      return { success: false, error: 'Current password does not match our records.' };
-    }
-
     // Validate new password strength
     const strength = validatePasswordStrength(newPassword);
     if (!strength.isValid) {
       return { success: false, error: strength.errors[0] };
     }
 
-    // Generate new salt and hash
+    // Authoritative server-side verification and re-hashing against Cloudflare D1.
+    try {
+      const res = await fetch('/api/auth/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, currentPassword, newPassword })
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || json.success === false) {
+        return { success: false, error: json.error || 'Current password does not match our records.' };
+      }
+
+      const users = storageService.getUsers().map(u => {
+        if (u.id === userId) {
+          return {
+            ...u,
+            requiresPasswordChange: false,
+            accountStatus: u.accountStatus === 'Password Reset Required' ? ('Active' as const) : u.accountStatus,
+            passwordChangedAt: new Date().toISOString()
+          };
+        }
+        return u;
+      });
+      setToStorage(STORAGE_KEYS.USERS, users);
+      logAudit(user, 'PASSWORD_CHANGE_SUCCESS', 'User', userId, `Password updated successfully for ${user.username}`);
+      await syncWithServer();
+      return { success: true };
+    } catch (err) {
+      console.warn('Cloudflare D1 password change unreachable; falling back to local verification.', err);
+    }
+
+    // Offline fallback: verify and re-hash locally, then persist the change to D1.
+    const isCurrentValid = await verifyPassword(currentPassword, user.salt, user.passwordHash);
+    if (!isCurrentValid) {
+      return { success: false, error: 'Current password does not match our records.' };
+    }
+
     const newSalt = generateSalt();
     const newHash = await hashPassword(newPassword, newSalt);
 
@@ -950,6 +1060,7 @@ export const storageService = {
 
     setToStorage(STORAGE_KEYS.USERS, users);
     logAudit(user, 'PASSWORD_CHANGE_SUCCESS', 'User', userId, `Password updated successfully for ${user.username}`);
+    persistToD1('/api/auth/change-password', 'POST', { userId, currentPassword, newPassword }).catch(() => {});
     return { success: true };
   },
 
@@ -986,6 +1097,8 @@ export const storageService = {
 
     setToStorage(STORAGE_KEYS.USERS, users);
     logAudit(actor, 'ADMIN_PASSWORD_RESET', 'User', targetUserId, `${actor.name} (${actor.role}) reset password for ${targetUser.name} (${targetUser.username})`);
+    const resetUser = users.find(u => u.id === targetUserId);
+    if (resetUser) persistToD1(`/api/users/${targetUserId}`, 'PUT', resetUser, actor).catch(() => {});
     return { success: true, temporaryPassword: tempPassword };
   },
 
@@ -1131,6 +1244,7 @@ export const storageService = {
     const users = storageService.getUsers();
     setToStorage(STORAGE_KEYS.USERS, [...users, newUser]);
     logAudit(actor, 'CREATE_USER_ACCOUNT', 'User', newUser.id, `${actor.name} created account for ${newUser.name} (${newUser.username}) as ${newUser.role}`);
+    persistToD1('/api/users', 'POST', newUser, actor).then(() => syncWithServer()).catch(() => {});
     return { success: true, user: newUser };
   },
 
@@ -1180,6 +1294,7 @@ export const storageService = {
     const users = storageService.getUsers().map(u => u.id === updatedUser.id ? sanitizedUser : u);
     setToStorage(STORAGE_KEYS.USERS, users);
     logAudit(actor, 'UPDATE_USER_ACCOUNT', 'User', updatedUser.id, `${actor.name} updated account details for ${sanitizedUser.name} (${sanitizedUser.username})`);
+    persistToD1(`/api/users/${updatedUser.id}`, 'PUT', sanitizedUser, actor).then(() => syncWithServer()).catch(() => {});
     return { success: true };
   },
 
@@ -1202,6 +1317,8 @@ export const storageService = {
 
     setToStorage(STORAGE_KEYS.USERS, users);
     logAudit(actor, 'SET_USER_STATUS', 'User', targetUserId, `${actor.name} changed account status of ${target.name} to ${newStatus}`);
+    const statusUser = users.find(u => u.id === targetUserId);
+    if (statusUser) persistToD1(`/api/users/${targetUserId}`, 'PUT', statusUser, actor).then(() => syncWithServer()).catch(() => {});
     return { success: true };
   },
 
@@ -1224,6 +1341,8 @@ export const storageService = {
 
     setToStorage(STORAGE_KEYS.USERS, users);
     logAudit(actor, 'ARCHIVE_USER_ACCOUNT', 'User', targetUserId, `${actor.name} archived personnel account ${target.name} (${target.username})`);
+    const archivedUser = users.find(u => u.id === targetUserId);
+    if (archivedUser) persistToD1(`/api/users/${targetUserId}`, 'PUT', archivedUser, actor).then(() => syncWithServer()).catch(() => {});
     return { success: true };
   },
 
@@ -1236,6 +1355,8 @@ export const storageService = {
     });
     setToStorage(STORAGE_KEYS.USERS, users);
     logAudit(actor, 'UPDATE_AVAILABILITY', 'Counsel', userId, `Changed status to ${availability}`);
+    const counsel = users.find(u => u.id === userId);
+    if (counsel) persistToD1(`/api/users/${userId}`, 'PUT', counsel, actor).then(() => syncWithServer()).catch(() => {});
   },
 
   // Branches
@@ -1248,12 +1369,14 @@ export const storageService = {
     };
     setToStorage(STORAGE_KEYS.BRANCHES, [...branches, newBranch]);
     logAudit(actor, 'CREATE_BRANCH', 'Branch', newBranch.id, `Created branch: ${newBranch.name}`);
+    persistRecord('branches', 'POST', newBranch, actor);
     return newBranch;
   },
   updateBranch: (branch: Branch, actor: User): void => {
     const branches = storageService.getBranches().map(b => b.id === branch.id ? branch : b);
     setToStorage(STORAGE_KEYS.BRANCHES, branches);
     logAudit(actor, 'UPDATE_BRANCH', 'Branch', branch.id, `Updated branch: ${branch.name}`);
+    persistRecord('branches', 'PUT', branch, actor);
   },
   deleteBranch: (branchId: string, actor: User): { success: boolean; error?: string } => {
     if (actor.role !== 'PRINCIPAL_PARTNER') {
@@ -1270,6 +1393,7 @@ export const storageService = {
     const remaining = branches.filter(b => b.id !== branchId);
     setToStorage(STORAGE_KEYS.BRANCHES, remaining);
     logAudit(actor, 'DELETE_BRANCH', 'Branch', branchId, `Principal Partner deleted branch: ${target.name} (${target.code})`);
+    persistRecord('branches', 'DELETE', { id: branchId }, actor);
     return { success: true };
   },
 
@@ -1280,6 +1404,7 @@ export const storageService = {
     const newCourt: Court = { ...court, id: `crt-${Date.now()}` };
     setToStorage(STORAGE_KEYS.COURTS, [...courts, newCourt]);
     logAudit(actor, 'ADD_COURT', 'Court', newCourt.id, `Added court: ${newCourt.name}`);
+    persistRecord('courts', 'POST', newCourt, actor);
     return newCourt;
   },
 
@@ -1444,6 +1569,7 @@ export const storageService = {
     const updated = invoices.map(i => i.id === updatedInvoice.id ? updatedInvoice : i);
     setToStorage(STORAGE_KEYS.INVOICES, updated);
     logAudit(actor, 'UPDATE_INVOICE', 'Invoice', updatedInvoice.id, `${actor.name} edited invoice ${updatedInvoice.invoiceNumber} for ${updatedInvoice.clientName}`);
+    persistRecord('invoices', 'PUT', updatedInvoice, actor);
     return { success: true };
   },
   submitInvoiceForApproval: (invoiceCode: string, reason: string, actor: User): { success: boolean; request?: ApprovalRequest; error?: string } => {
@@ -1477,6 +1603,8 @@ export const storageService = {
     });
     setToStorage(STORAGE_KEYS.INVOICES, updatedInvoices);
     logAudit(actor, 'SUBMIT_INVOICE_APPROVAL', 'Invoice', invoice.id, `${actor.name} submitted invoice ${invoice.invoiceNumber} for Principal Partner authorization`);
+    const submitted = updatedInvoices.find(i => i.id === invoice.id);
+    if (submitted) persistRecord('invoices', 'PUT', submitted, actor);
     return { success: true, request: req };
   },
   submitPayment: (data: {
@@ -1618,6 +1746,7 @@ export const storageService = {
     };
     setToStorage(STORAGE_KEYS.EXPENSES, [newExpense, ...expenses]);
     logAudit(actor, 'RECORD_EXPENSE', 'Expense', newExpense.id, `Recorded ${expense.accountType} expense: ₦${expense.amount.toLocaleString()} - ${expense.description}`);
+    persistRecord('expenses', 'POST', newExpense, actor);
     return newExpense;
   },
 
@@ -1704,6 +1833,7 @@ export const storageService = {
       status: 'PENDING'
     };
     setToStorage(STORAGE_KEYS.CASE_ASSIGNMENTS, [newAssignment, ...assignments]);
+    persistRecord('case_assignments', 'POST', newAssignment);
 
     dispatchNotification(
       'New Case Assignment',
@@ -1735,6 +1865,8 @@ export const storageService = {
       return a;
     });
     setToStorage(STORAGE_KEYS.CASE_ASSIGNMENTS, assignments);
+    const updatedAssignment = assignments.find(a => a.id === assignmentId);
+    if (updatedAssignment) persistRecord('case_assignments', 'PUT', updatedAssignment, actor);
 
     const assignment = assignments.find(a => a.id === assignmentId);
     if (assignment) {
@@ -1777,6 +1909,7 @@ export const storageService = {
         assignedByName: actor.name
       });
       logAudit(actor, 'REASSIGN_CASE', 'Case', caseId, `Reassigned case ${caseItem.suitNumber} to user ${newCounselId}`);
+      persistRecord('cases', 'PUT', caseItem, actor);
     }
   },
 
@@ -1801,12 +1934,16 @@ export const storageService = {
     setToStorage(STORAGE_KEYS.CASES, cases);
 
     logAudit(actor, 'SCHEDULE_COURT_DATE', 'CourtDiary', newEntry.id, `Scheduled court appearance for ${entry.suitNumber} on ${entry.courtDate}`);
+    persistRecord('court_diary', 'POST', newEntry, actor);
+    const updatedCase = cases.find(c => c.id === entry.caseId);
+    if (updatedCase) persistRecord('cases', 'PUT', updatedCase, actor);
     return newEntry;
   },
   updateCourtDiaryEntry: (entry: CourtDiaryEntry, actor: User): void => {
     const list = storageService.getCourtDiary().map(e => e.id === entry.id ? entry : e);
     setToStorage(STORAGE_KEYS.COURT_DIARY, list);
     logAudit(actor, 'UPDATE_COURT_DIARY', 'CourtDiary', entry.id, `Updated court date entry for ${entry.suitNumber}`);
+    persistRecord('court_diary', 'PUT', entry, actor);
   },
 
   // Tasks
@@ -1821,6 +1958,7 @@ export const storageService = {
     };
     setToStorage(STORAGE_KEYS.TASKS, [newTask, ...tasks]);
     logAudit(actor, 'CREATE_TASK', 'Task', newTask.id, `Created task: ${newTask.title}`);
+    persistRecord('tasks', 'POST', newTask, actor);
     dispatchNotification('New Task Assigned', `Task "${newTask.title}" assigned to you by ${actor.name}`, 'info', undefined, task.assignedToId);
     return newTask;
   },
@@ -1828,6 +1966,7 @@ export const storageService = {
     const list = storageService.getTasks().map(t => t.id === task.id ? task : t);
     setToStorage(STORAGE_KEYS.TASKS, list);
     logAudit(actor, 'UPDATE_TASK', 'Task', task.id, `Updated task ${task.title} status: ${task.status}`);
+    persistRecord('tasks', 'PUT', task, actor);
   },
 
   // Documents
@@ -1846,6 +1985,7 @@ export const storageService = {
     };
     setToStorage(STORAGE_KEYS.DOCUMENTS, [newDoc, ...documents]);
     logAudit(actor, 'UPLOAD_DOCUMENT', 'Document', newDoc.id, `Uploaded document: ${newDoc.title} (${docCode})`);
+    persistRecord('documents', 'POST', newDoc, actor);
     return newDoc;
   },
 
@@ -1860,6 +2000,7 @@ export const storageService = {
     };
     setToStorage(STORAGE_KEYS.CORRESPONDENCE, [newItem, ...items]);
     logAudit(actor, 'LOG_CORRESPONDENCE', 'Correspondence', newItem.id, `Logged ${newItem.type}: ${newItem.subject}`);
+    persistRecord('correspondence', 'POST', newItem, actor);
     return newItem;
   },
 
@@ -1876,6 +2017,7 @@ export const storageService = {
     };
     setToStorage(STORAGE_KEYS.LEGAL_RESEARCH, [newItem, ...items]);
     logAudit(actor, 'ADD_LEGAL_RESEARCH', 'LegalResearch', newItem.id, `Recorded legal memo: ${newItem.topic}`);
+    persistRecord('legal_research', 'POST', newItem, actor);
     return newItem;
   },
 
@@ -1886,6 +2028,7 @@ export const storageService = {
     const newApp: Appointment = { ...app, id: `app-${Date.now()}` };
     setToStorage(STORAGE_KEYS.APPOINTMENTS, [newApp, ...apps]);
     logAudit(actor, 'SCHEDULE_APPOINTMENT', 'Appointment', newApp.id, `Scheduled appointment for ${app.clientName} on ${app.date}`);
+    persistRecord('appointments', 'POST', newApp, actor);
     return newApp;
   },
 
@@ -1902,12 +2045,14 @@ export const storageService = {
     };
     setToStorage(STORAGE_KEYS.PROPERTIES, [newProp, ...props]);
     logAudit(actor, 'ADD_PROPERTY', 'Property', newProp.id, `Registered property: ${newProp.name} (${propertyId})`);
+    persistRecord('properties', 'POST', newProp, actor);
     return newProp;
   },
   updateProperty: (prop: Property, actor: User): void => {
     const list = storageService.getProperties().map(p => p.id === prop.id ? prop : p);
     setToStorage(STORAGE_KEYS.PROPERTIES, list);
     logAudit(actor, 'UPDATE_PROPERTY', 'Property', prop.id, `Updated property: ${prop.name}`);
+    persistRecord('properties', 'PUT', prop, actor);
   },
 
   // Landlords
@@ -1925,6 +2070,7 @@ export const storageService = {
     };
     setToStorage(STORAGE_KEYS.LANDLORDS, [newLandlord, ...list]);
     logAudit(actor, 'ADD_LANDLORD', 'Landlord', newLandlord.id, `Registered landlord: ${newLandlord.fullName} (${trackingCode})`);
+    persistRecord('landlords', 'POST', newLandlord, actor);
     return newLandlord;
   },
 
@@ -1935,6 +2081,7 @@ export const storageService = {
     const newUnit: Unit = { ...unit, id: `unt-${Date.now()}` };
     setToStorage(STORAGE_KEYS.UNITS, [newUnit, ...units]);
     logAudit(actor, 'ADD_UNIT', 'Unit', newUnit.id, `Added unit ${unit.unitNumber}`);
+    persistRecord('units', 'POST', newUnit, actor);
     return newUnit;
   },
 
@@ -1953,6 +2100,7 @@ export const storageService = {
     };
     setToStorage(STORAGE_KEYS.TENANTS, [newTenant, ...list]);
     logAudit(actor, 'ADD_TENANT', 'Tenant', newTenant.id, `Registered tenant: ${newTenant.fullName} (${trackingCode})`);
+    persistRecord('tenants', 'POST', newTenant, actor);
     return newTenant;
   },
   getTenancies: (): Tenancy[] => getFromStorage<Tenancy[]>(STORAGE_KEYS.TENANCIES, []),
@@ -1961,6 +2109,7 @@ export const storageService = {
     const newTenancy: Tenancy = { ...tenancy, id: `ten-${Date.now()}` };
     setToStorage(STORAGE_KEYS.TENANCIES, [newTenancy, ...list]);
     logAudit(actor, 'CREATE_TENANCY', 'Tenancy', newTenancy.id, `Created tenancy for unit ${tenancy.unitNumber}`);
+    persistRecord('tenancies', 'POST', newTenancy, actor);
     return newTenancy;
   },
 
@@ -1971,6 +2120,7 @@ export const storageService = {
     const newRent: RentRecord = { ...rent, id: `rent-${Date.now()}` };
     setToStorage(STORAGE_KEYS.RENT_RECORDS, [newRent, ...list]);
     logAudit(actor, 'RECORD_RENT', 'RentRecord', newRent.id, `Recorded rent of ₦${rent.amountPaid.toLocaleString()} for ${rent.tenantName}`);
+    persistRecord('rent_records', 'POST', newRent, actor);
     return newRent;
   },
 
@@ -1985,12 +2135,14 @@ export const storageService = {
     };
     setToStorage(STORAGE_KEYS.PROPERTY_DISPUTES, [newDispute, ...list]);
     logAudit(actor, 'INITIATE_PREMISES_RECOVERY', 'PropertyDispute', newDispute.id, `Initiated recovery workflow: ${newDispute.complaintTitle}`);
+    persistRecord('property_disputes', 'POST', newDispute, actor);
     return newDispute;
   },
   updatePropertyDispute: (dispute: PropertyDispute, actor: User): void => {
     const list = storageService.getPropertyDisputes().map(d => d.id === dispute.id ? dispute : d);
     setToStorage(STORAGE_KEYS.PROPERTY_DISPUTES, list);
     logAudit(actor, 'UPDATE_PREMISES_RECOVERY', 'PropertyDispute', dispute.id, `Stage updated to: ${dispute.workflowStage}`);
+    persistRecord('property_disputes', 'PUT', dispute, actor);
   },
 
   // Quit Notices
@@ -2022,6 +2174,7 @@ export const storageService = {
     };
     setToStorage(STORAGE_KEYS.QUIT_NOTICES, [newNotice, ...list]);
     logAudit(actor, 'ISSUE_QUIT_NOTICE', 'QuitNotice', newNotice.id, `Issued ${data.noticeType} to ${data.tenantName} for unit ${data.unitNumber} at ${data.propertyName}`);
+    persistRecord('quit_notices', 'POST', newNotice, actor);
 
     // Update tenant status to reflect quit notice
     const tenants = storageService.getTenants().map(t => {
@@ -2031,6 +2184,8 @@ export const storageService = {
       return t;
     });
     setToStorage(STORAGE_KEYS.TENANTS, tenants);
+    const updatedTenant = tenants.find(t => t.id === data.tenantId);
+    if (updatedTenant) persistRecord('tenants', 'PUT', updatedTenant, actor);
 
     dispatchNotification(
       'Quit Notice Issued',
@@ -2045,6 +2200,8 @@ export const storageService = {
     const list = storageService.getQuitNotices().map(q => q.id === id ? { ...q, status } : q);
     setToStorage(STORAGE_KEYS.QUIT_NOTICES, list);
     logAudit(actor, 'UPDATE_QUIT_NOTICE', 'QuitNotice', id, `Quit notice status updated to: ${status}`);
+    const notice = list.find(q => q.id === id);
+    if (notice) persistRecord('quit_notices', 'PUT', notice, actor);
   },
 
   // Rent Due Notification Check — generates notifications 30 days before tenancy expiry
@@ -2094,6 +2251,7 @@ export const storageService = {
     const newInst: Institution = { ...inst, id: `inst-${Date.now()}` };
     setToStorage(STORAGE_KEYS.INSTITUTIONS, [...list, newInst]);
     logAudit(actor, 'ADD_INSTITUTION', 'Institution', newInst.id, `Registered institution: ${newInst.name}`);
+    persistRecord('partner_institutions', 'POST', newInst, actor);
     return newInst;
   },
   getStudents: (): StudentProfile[] => getFromStorage<StudentProfile[]>(STORAGE_KEYS.STUDENTS, []),
@@ -2109,6 +2267,7 @@ export const storageService = {
     };
     setToStorage(STORAGE_KEYS.STUDENTS, [newStudent, ...students]);
     logAudit(actor, 'REGISTER_STUDENT', 'StudentProfile', newStudent.id, `Registered intern: ${newStudent.fullName} (${studentId})`);
+    persistRecord('students', 'POST', newStudent, actor);
     dispatchNotification('New Student Placement Recorded', `${newStudent.fullName} (${newStudent.institutionName}) enrolled under ${newStudent.placementType}`, 'info', 'HEAD_OF_CHAMBER');
     return newStudent;
   },
@@ -2116,6 +2275,7 @@ export const storageService = {
     const list = storageService.getStudents().map(s => s.id === student.id ? student : s);
     setToStorage(STORAGE_KEYS.STUDENTS, list);
     logAudit(actor, 'UPDATE_STUDENT', 'StudentProfile', student.id, `Updated student profile: ${student.fullName}`);
+    persistRecord('students', 'PUT', student, actor);
   },
   applyForInternshipPublic: (data: {
     fullName: string;
@@ -2153,6 +2313,7 @@ export const storageService = {
       createdAt: new Date().toISOString()
     };
     setToStorage(STORAGE_KEYS.STUDENTS, [newStudent, ...students]);
+    persistRecord('students', 'POST', newStudent);
     dispatchNotification(
       'New Public Internship Application',
       `Application received from ${data.fullName} (${studentId}, ${data.institutionName})`,
@@ -2167,6 +2328,7 @@ export const storageService = {
     const newAtt: InternshipAttendance = { ...att, id: `att-${Date.now()}` };
     setToStorage(STORAGE_KEYS.ATTENDANCE, [newAtt, ...list]);
     logAudit(actor, 'LOG_ATTENDANCE', 'InternshipAttendance', newAtt.id, `Logged attendance for ${att.studentName}: ${att.status}`);
+    persistRecord('internship_attendance', 'POST', newAtt, actor);
     return newAtt;
   },
   getEvaluations: (): InternshipEvaluation[] => getFromStorage<InternshipEvaluation[]>(STORAGE_KEYS.EVALUATIONS, []),
@@ -2175,6 +2337,7 @@ export const storageService = {
     const newEval: InternshipEvaluation = { ...evaluation, id: `eval-${Date.now()}` };
     setToStorage(STORAGE_KEYS.EVALUATIONS, [newEval, ...list]);
     logAudit(actor, 'SUBMIT_EVALUATION', 'InternshipEvaluation', newEval.id, `Evaluated intern: ${evaluation.studentName}`);
+    persistRecord('internship_evaluations', 'POST', newEval, actor);
     return newEval;
   },
 
@@ -2191,17 +2354,20 @@ export const storageService = {
     };
     setToStorage(STORAGE_KEYS.PUBLIC_NOTICES, [newNotice, ...list]);
     logAudit(actor, 'PUBLISH_NOTICE', 'PublicNotice', newNotice.id, `Published notice: ${newNotice.title}`);
+    persistRecord('public_notices', 'POST', newNotice, actor);
     return newNotice;
   },
   updatePublicNotice: (notice: PublicNotice, actor: User): void => {
     const list = storageService.getPublicNotices().map(n => n.id === notice.id ? notice : n);
     setToStorage(STORAGE_KEYS.PUBLIC_NOTICES, list);
     logAudit(actor, 'UPDATE_NOTICE', 'PublicNotice', notice.id, `Updated notice: ${notice.title}`);
+    persistRecord('public_notices', 'PUT', notice, actor);
   },
   deletePublicNotice: (noticeId: string, actor: User): void => {
     const list = storageService.getPublicNotices().filter(n => n.id !== noticeId);
     setToStorage(STORAGE_KEYS.PUBLIC_NOTICES, list);
     logAudit(actor, 'DELETE_NOTICE', 'PublicNotice', noticeId, `Deleted notice ${noticeId}`);
+    persistRecord('public_notices', 'DELETE', { id: noticeId }, actor);
   },
   getPublicEnquiries: (): PublicEnquiry[] => getFromStorage<PublicEnquiry[]>(STORAGE_KEYS.PUBLIC_ENQUIRIES, []),
   submitPublicEnquiry: (enquiry: Omit<PublicEnquiry, 'id' | 'createdAt' | 'status'>): PublicEnquiry => {
@@ -2213,6 +2379,7 @@ export const storageService = {
       createdAt: new Date().toISOString()
     };
     setToStorage(STORAGE_KEYS.PUBLIC_ENQUIRIES, [newEnquiry, ...list]);
+    persistRecord('public_enquiries', 'POST', newEnquiry);
     dispatchNotification('New Public Chambers Enquiry', `Enquiry received from ${enquiry.fullName}: ${enquiry.subject}`, 'info', 'ADMINISTRATOR_SECRETARY');
     return newEnquiry;
   },
@@ -2229,6 +2396,7 @@ export const storageService = {
     };
     setToStorage(STORAGE_KEYS.APPROVALS, [newReq, ...list]);
     logAudit(actor, 'SUBMIT_APPROVAL_REQUEST', 'ApprovalRequest', newReq.id, `Submitted request: ${newReq.title}`);
+    persistRecord('approval_requests', 'POST', newReq, actor);
     dispatchNotification(
       'Pending Principal Partner Authorization',
       `${actor.name} (${actor.role}) submitted: "${newReq.title}" requiring your executive approval.`,
@@ -2253,6 +2421,7 @@ export const storageService = {
     });
     setToStorage(STORAGE_KEYS.APPROVALS, list);
     const req = list.find(a => a.id === requestId);
+    if (req) persistRecord('approval_requests', 'PUT', req, actor);
     if (req) {
       // Sync linked invoice approval status if this was an invoice approval request
       if (req.requestType === 'Invoice Billing Approval' || req.referenceCode) {
@@ -2267,6 +2436,8 @@ export const storageService = {
           return inv;
         });
         setToStorage(STORAGE_KEYS.INVOICES, invList);
+        const decidedInvoice = invList.find(inv => inv.invoiceNumber === req.referenceCode || inv.approvalRequestId === req.id);
+        if (decidedInvoice) persistRecord('invoices', 'PUT', decidedInvoice, actor);
       }
 
       logAudit(actor, `APPROVAL_${status}`, 'ApprovalRequest', requestId, `Principal Partner decided: ${status}. Notes: ${notes}`);
