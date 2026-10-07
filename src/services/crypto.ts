@@ -3,10 +3,21 @@
  * Ensures passwords are never stored or transmitted in plain text.
  */
 
+// Get universal crypto object across browser, Cloudflare Workers, and Node.js
+const getCrypto = (): Crypto => {
+  if (typeof globalThis !== 'undefined' && globalThis.crypto) {
+    return globalThis.crypto;
+  }
+  if (typeof window !== 'undefined' && window.crypto) {
+    return window.crypto;
+  }
+  throw new Error('Web Cryptography API is not available in this environment');
+};
+
 // Generate a random cryptographic salt
 export function generateSalt(length: number = 16): string {
   const array = new Uint8Array(length);
-  window.crypto.getRandomValues(array);
+  getCrypto().getRandomValues(array);
   return Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
@@ -14,7 +25,7 @@ export function generateSalt(length: number = 16): string {
 export async function hashPassword(password: string, salt: string): Promise<string> {
   const encoder = new TextEncoder();
   const data = encoder.encode(password + salt + 'B_B_BALE_CHAMBERS_SECURITY_PEPPER_2026');
-  const hashBuffer = await window.crypto.subtle.digest('SHA-256', data);
+  const hashBuffer = await getCrypto().subtle.digest('SHA-256', data);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
@@ -28,7 +39,7 @@ export async function verifyPassword(password: string, salt: string, storedHash:
 // Generate random secure token for temporary reset
 export function generateSecureToken(): string {
   const array = new Uint8Array(24);
-  window.crypto.getRandomValues(array);
+  getCrypto().getRandomValues(array);
   return Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('');
 }
 

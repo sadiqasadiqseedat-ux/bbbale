@@ -446,6 +446,144 @@ function notifySubscribers() {
   });
 }
 
+// =========================================================================
+// REAL DATABASE STATUS & CROSS-DEVICE SYNCHRONIZATION
+// =========================================================================
+
+export interface DatabaseSaveState {
+  status: 'idle' | 'saving' | 'saved' | 'error';
+  message: string;
+  lastSavedAt?: string;
+}
+
+let currentSaveState: DatabaseSaveState = {
+  status: 'idle',
+  message: 'Cloudflare D1 Central Database'
+};
+
+type SaveStatusListener = (state: DatabaseSaveState) => void;
+const saveStatusListeners = new Set<SaveStatusListener>();
+
+export function subscribeToSaveStatus(listener: SaveStatusListener) {
+  saveStatusListeners.add(listener);
+  listener(currentSaveState);
+  return () => {
+    saveStatusListeners.delete(listener);
+  };
+}
+
+export function getDatabaseSaveStatus(): DatabaseSaveState {
+  return currentSaveState;
+}
+
+let saveResetTimer: any = null;
+export function setSaveState(state: DatabaseSaveState) {
+  currentSaveState = state;
+  saveStatusListeners.forEach(fn => {
+    try { fn(state); } catch (e) { console.error('Save status listener error:', e); }
+  });
+
+  if (saveResetTimer) clearTimeout(saveResetTimer);
+  if (state.status === 'saved' || state.status === 'error') {
+    saveResetTimer = setTimeout(() => {
+      currentSaveState = { status: 'idle', message: 'Cloudflare D1 Central Database', lastSavedAt: state.lastSavedAt };
+      saveStatusListeners.forEach(fn => {
+        try { fn(currentSaveState); } catch {}
+      });
+    }, state.status === 'saved' ? 3000 : 4500);
+  }
+}
+
+let isSyncing = false;
+let syncStarted = false;
+
+/**
+ * Authoritative cross-device sync from Cloudflare D1
+ */
+export async function syncWithServer(): Promise<boolean> {
+  if (isSyncing) return false;
+  isSyncing = true;
+  try {
+    const res = await fetch('/api/sync/all');
+    if (!res.ok) {
+      isSyncing = false;
+      return false;
+    }
+    const json = await res.json();
+    if (!json.success || !json.data) {
+      isSyncing = false;
+      return false;
+    }
+
+    const {
+      branches, users, courts, institutions, clients, consultations,
+      matters, cases, caseAssignments, courtDiary, tasks, properties,
+      landlords, tenants, tenancies, quitNotices, invoices, payments,
+      expenses, students, legalResearch, documents, publicNotices,
+      publicEnquiries, approvals, auditLogs, websiteContent
+    } = json.data;
+
+    if (users && users.length > 0) localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
+    if (branches && branches.length > 0) localStorage.setItem(STORAGE_KEYS.BRANCHES, JSON.stringify(branches));
+    if (courts && courts.length > 0) localStorage.setItem(STORAGE_KEYS.COURTS, JSON.stringify(courts));
+    if (institutions && institutions.length > 0) localStorage.setItem(STORAGE_KEYS.INSTITUTIONS, JSON.stringify(institutions));
+    if (clients) localStorage.setItem(STORAGE_KEYS.CLIENTS, JSON.stringify(clients));
+    if (consultations) localStorage.setItem(STORAGE_KEYS.CONSULTATIONS, JSON.stringify(consultations));
+    if (matters) localStorage.setItem(STORAGE_KEYS.MATTERS, JSON.stringify(matters));
+    if (cases) localStorage.setItem(STORAGE_KEYS.CASES, JSON.stringify(cases));
+    if (caseAssignments) localStorage.setItem(STORAGE_KEYS.CASE_ASSIGNMENTS, JSON.stringify(caseAssignments));
+    if (courtDiary) localStorage.setItem(STORAGE_KEYS.COURT_DIARY, JSON.stringify(courtDiary));
+    if (tasks) localStorage.setItem(STORAGE_KEYS.TASKS, JSON.stringify(tasks));
+    if (properties) localStorage.setItem(STORAGE_KEYS.PROPERTIES, JSON.stringify(properties));
+    if (landlords) localStorage.setItem(STORAGE_KEYS.LANDLORDS, JSON.stringify(landlords));
+    if (tenants) localStorage.setItem(STORAGE_KEYS.TENANTS, JSON.stringify(tenants));
+    if (tenancies) localStorage.setItem(STORAGE_KEYS.TENANCIES, JSON.stringify(tenancies));
+    if (quitNotices) localStorage.setItem(STORAGE_KEYS.QUIT_NOTICES, JSON.stringify(quitNotices));
+    if (invoices) localStorage.setItem(STORAGE_KEYS.INVOICES, JSON.stringify(invoices));
+    if (payments) localStorage.setItem(STORAGE_KEYS.PAYMENTS, JSON.stringify(payments));
+    if (expenses) localStorage.setItem(STORAGE_KEYS.EXPENSES, JSON.stringify(expenses));
+    if (students) localStorage.setItem(STORAGE_KEYS.STUDENTS, JSON.stringify(students));
+    if (legalResearch) localStorage.setItem(STORAGE_KEYS.LEGAL_RESEARCH, JSON.stringify(legalResearch));
+    if (documents) localStorage.setItem(STORAGE_KEYS.DOCUMENTS, JSON.stringify(documents));
+    if (publicNotices) localStorage.setItem(STORAGE_KEYS.PUBLIC_NOTICES, JSON.stringify(publicNotices));
+    if (publicEnquiries) localStorage.setItem(STORAGE_KEYS.PUBLIC_ENQUIRIES, JSON.stringify(publicEnquiries));
+    if (approvals) localStorage.setItem(STORAGE_KEYS.APPROVALS, JSON.stringify(approvals));
+    if (auditLogs) localStorage.setItem(STORAGE_KEYS.AUDIT_LOGS, JSON.stringify(auditLogs));
+    if (websiteContent) localStorage.setItem(STORAGE_KEYS.WEBSITE_CONTENT, JSON.stringify(websiteContent));
+
+    notifySubscribers();
+    isSyncing = false;
+    return true;
+  } catch (err) {
+    console.warn('Sync with Cloudflare D1 server encountered network error:', err);
+    isSyncing = false;
+    return false;
+  }
+}
+
+export function startAutoSync(intervalMs: number = 8000) {
+  if (syncStarted || typeof window === 'undefined') return;
+  syncStarted = true;
+
+  // Immediate sync
+  syncWithServer();
+
+  // Polling loop
+  setInterval(() => {
+    syncWithServer();
+  }, intervalMs);
+
+  // Sync on tab focus
+  window.addEventListener('focus', () => {
+    syncWithServer();
+  });
+
+  // Sync on reconnect
+  window.addEventListener('online', () => {
+    syncWithServer();
+  });
+}
+
 function getFromStorage<T>(key: string, fallback: T): T {
   try {
     const raw = localStorage.getItem(key);
@@ -540,32 +678,6 @@ export async function initializeStorage(): Promise<void> {
       });
     }
     localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(initializedUsers));
-  } else {
-    try {
-      const parsedUsers: User[] = JSON.parse(existingUsers);
-      let updated = false;
-      for (const u of parsedUsers) {
-        if (u.id === 'usr-principal-01') {
-          u.username = 'principal.partner';
-          u.email = 'principal@bbbalechambers.ng';
-          updated = true;
-        }
-        if (u.isPubliclyVisible === undefined || u.isPubliclyVisible === false) {
-          u.isPubliclyVisible = true;
-          updated = true;
-        }
-        if (u.requiresPasswordChange) {
-          u.passwordHash = await hashPassword(defaultSetupPassword, u.salt);
-          updated = true;
-        }
-      }
-      if (updated) {
-        localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(parsedUsers));
-        notifySubscribers();
-      }
-    } catch (e) {
-      console.error('Failed to parse existing users', e);
-    }
   }
 
   if (!localStorage.getItem(STORAGE_KEYS.BRANCHES)) {
@@ -582,6 +694,35 @@ export async function initializeStorage(): Promise<void> {
   }
   if (!localStorage.getItem(STORAGE_KEYS.WEBSITE_CONTENT)) {
     localStorage.setItem(STORAGE_KEYS.WEBSITE_CONTENT, JSON.stringify(INITIAL_WEBSITE_CONTENT));
+  }
+
+  // Start continuous synchronization with Cloudflare D1
+  startAutoSync(8000);
+  await syncWithServer();
+}
+
+// D1 API Mutation Helper
+async function persistToD1(endpoint: string, method: string, data: any, actor?: User) {
+  setSaveState({ status: 'saving', message: 'Saving to Cloudflare D1...' });
+  try {
+    const res = await fetch(endpoint, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(actor ? { 'X-User-Id': actor.id, 'X-User-Role': actor.role } : {})
+      },
+      body: JSON.stringify(data)
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || json.success === false) {
+      throw new Error(json.error || `HTTP ${res.status}`);
+    }
+    setSaveState({ status: 'saved', message: 'Saved successfully', lastSavedAt: new Date().toLocaleTimeString() });
+    return json;
+  } catch (err: any) {
+    console.error(`D1 API persistence failed for ${method} ${endpoint}:`, err);
+    setSaveState({ status: 'error', message: 'Failed to save. Please try again.' });
+    throw err;
   }
 }
 
@@ -1156,12 +1297,14 @@ export const storageService = {
     setToStorage(STORAGE_KEYS.CLIENTS, [newClient, ...clients]);
     logAudit(actor, 'REGISTER_CLIENT', 'Client', newClient.id, `Registered client: ${newClient.fullName} (${clientId})`);
     dispatchNotification('New Client Registered', `${actor.name} registered client ${newClient.fullName}`, 'info', 'ADMINISTRATOR_SECRETARY');
+    persistToD1('/api/clients', 'POST', newClient, actor).then(() => syncWithServer()).catch(() => {});
     return newClient;
   },
   updateClient: (client: Client, actor: User): void => {
     const clients = storageService.getClients().map(c => c.id === client.id ? client : c);
     setToStorage(STORAGE_KEYS.CLIENTS, clients);
     logAudit(actor, 'UPDATE_CLIENT', 'Client', client.id, `Updated client ${client.fullName}`);
+    persistToD1(`/api/clients/${client.id}`, 'PUT', client, actor).then(() => syncWithServer()).catch(() => {});
   },
 
   // Consultations & Invoices & Payments Flow
@@ -1246,12 +1389,22 @@ export const storageService = {
       'ACCOUNT_OFFICER'
     );
 
+    persistToD1('/api/consultations', 'POST', {
+      ...data,
+      id: newConsultation.id,
+      code,
+      invoiceNumber,
+      paymentReference: paymentRef,
+      feeAmount: fee
+    }).then(() => syncWithServer()).catch(() => {});
+
     return { consultation: newConsultation, invoice: newInvoice, paymentRef };
   },
   updateConsultation: (consultation: Consultation, actor: User): void => {
     const list = storageService.getConsultations().map(c => c.id === consultation.id ? consultation : c);
     setToStorage(STORAGE_KEYS.CONSULTATIONS, list);
     logAudit(actor, 'UPDATE_CONSULTATION', 'Consultation', consultation.id, `Updated consultation ${consultation.code}`);
+    persistToD1(`/api/consultations/${consultation.id}`, 'PUT', consultation, actor).then(() => syncWithServer()).catch(() => {});
   },
 
   // Invoices & Payments
@@ -1276,6 +1429,7 @@ export const storageService = {
     };
     setToStorage(STORAGE_KEYS.INVOICES, [newInvoice, ...invoices]);
     logAudit(actor, 'CREATE_INVOICE', 'Invoice', newInvoice.id, `Generated invoice ${invoiceNumber} for ${newInvoice.clientName} (₦${newInvoice.totalAmount.toLocaleString()})`);
+    persistToD1('/api/invoices', 'POST', newInvoice, actor).then(() => syncWithServer()).catch(() => {});
     return newInvoice;
   },
   updateInvoice: (updatedInvoice: Invoice, actor: User): { success: boolean; error?: string } => {
@@ -1382,6 +1536,8 @@ export const storageService = {
       'ACCOUNT_OFFICER'
     );
 
+    persistToD1('/api/payments/submit', 'POST', data).then(() => syncWithServer()).catch(() => {});
+
     return newPayment;
   },
   verifyPayment: (paymentId: string, isApproved: boolean, notes: string, actor: User): void => {
@@ -1443,6 +1599,8 @@ export const storageService = {
         isApproved ? 'success' : 'warning',
         'ADMINISTRATOR_SECRETARY'
       );
+
+      persistToD1('/api/payments/verify', 'POST', { paymentId, isApproved, notes }, actor).then(() => syncWithServer()).catch(() => {});
     }
   },
   getPayments: (): PaymentRecord[] => getFromStorage<PaymentRecord[]>(STORAGE_KEYS.PAYMENTS, []),
@@ -1478,12 +1636,14 @@ export const storageService = {
     setToStorage(STORAGE_KEYS.MATTERS, [newMatter, ...matters]);
     logAudit(actor, 'CREATE_MATTER', 'Matter', newMatter.id, `Created matter ${newMatter.title} (${matterId})`);
     dispatchNotification('New Legal Matter Opened', `Matter ${matterId} opened: ${newMatter.title}`, 'info');
+    persistToD1('/api/matters', 'POST', newMatter, actor).then(() => syncWithServer()).catch(() => {});
     return newMatter;
   },
   updateMatter: (matter: Matter, actor: User): void => {
     const list = storageService.getMatters().map(m => m.id === matter.id ? matter : m);
     setToStorage(STORAGE_KEYS.MATTERS, list);
     logAudit(actor, 'UPDATE_MATTER', 'Matter', matter.id, `Updated matter: ${matter.title}`);
+    persistToD1(`/api/matters/${matter.id}`, 'PUT', matter, actor).then(() => syncWithServer()).catch(() => {});
   },
 
   // Cases & Assignments
@@ -1511,12 +1671,14 @@ export const storageService = {
       assignedByName: actor.name
     });
 
+    persistToD1('/api/cases', 'POST', newCase, actor).then(() => syncWithServer()).catch(() => {});
     return newCase;
   },
   updateCase: (caseRecord: CaseRecord, actor: User): void => {
     const list = storageService.getCases().map(c => c.id === caseRecord.id ? caseRecord : c);
     setToStorage(STORAGE_KEYS.CASES, list);
     logAudit(actor, 'UPDATE_CASE', 'Case', caseRecord.id, `Updated litigation record: ${caseRecord.suitNumber}`);
+    persistToD1(`/api/cases/${caseRecord.id}`, 'PUT', caseRecord, actor).then(() => syncWithServer()).catch(() => {});
   },
 
   // Case Assignment Workflow

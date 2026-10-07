@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { startAutoSync } from './services/storage';
 import { PublicLayout } from './components/public/PublicLayout';
 import { HomePage } from './components/public/HomePage';
 import { AboutPage, PracticeAreasPage } from './components/public/PracticeAreasPage';
@@ -34,6 +35,11 @@ function MainApp() {
   const [publicView, setPublicView] = useState<string>('home');
   const [internalSection, setInternalSection] = useState<string>('dashboard');
   const [initialTrackingCode, setInitialTrackingCode] = useState<string>('');
+
+  useEffect(() => {
+    // Start continuous background auto-sync from Cloudflare D1
+    startAutoSync(8000);
+  }, []);
 
   const handleNavigatePublic = (view: string) => {
     setPublicView(view);

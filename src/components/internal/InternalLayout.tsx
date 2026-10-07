@@ -30,7 +30,7 @@ import { useAuth } from '../../context/AuthContext';
 import { NotificationMenu } from '../common/NotificationMenu';
 import { GlobalSearch } from '../common/GlobalSearch';
 import { UserRole, AvailabilityStatus } from '../../types';
-import { storageService } from '../../services/storage';
+import { storageService, subscribeToSaveStatus, DatabaseSaveState } from '../../services/storage';
 
 interface InternalLayoutProps {
   currentSection: string;
@@ -63,6 +63,15 @@ export const InternalLayout: React.FC<InternalLayoutProps> = ({
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [availabilityDropdownOpen, setAvailabilityDropdownOpen] = useState(false);
+  const [d1SaveState, setD1SaveState] = useState<DatabaseSaveState>({
+    status: 'idle',
+    message: 'Cloudflare D1 Central Database'
+  });
+
+  useEffect(() => {
+    const unsub = subscribeToSaveStatus(setD1SaveState);
+    return () => unsub();
+  }, []);
 
   // Keyboard shortcut for search (Ctrl+K or Cmd+K)
   useEffect(() => {
@@ -184,6 +193,26 @@ export const InternalLayout: React.FC<InternalLayoutProps> = ({
               </button>
 
               <NotificationMenu onNavigate={onNavigateSection} />
+
+              {/* Cloudflare D1 Database Status Indicator */}
+              <button
+                onClick={() => onNavigateSection('cloudflare_d1')}
+                className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg text-xs bg-slate-900 border border-slate-800 hover:border-slate-700 transition-colors shadow-xs"
+                title="Cloudflare D1 Central Production Database (Click for Console)"
+              >
+                <Database className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                <span className="hidden xl:inline text-slate-400 font-medium">D1 DB:</span>
+                <span className={`w-2 h-2 rounded-full shrink-0 ${
+                  d1SaveState.status === 'saving' ? 'bg-amber-400 animate-pulse' :
+                  d1SaveState.status === 'error' ? 'bg-red-500' :
+                  'bg-emerald-400'
+                }`} />
+                <span className="hidden sm:inline text-[11px] font-semibold text-slate-200">
+                  {d1SaveState.status === 'saving' ? 'Saving...' :
+                   d1SaveState.status === 'error' ? 'Sync Error' :
+                   'Connected'}
+                </span>
+              </button>
 
               {/* View Public Website */}
               <button

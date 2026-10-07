@@ -536,6 +536,114 @@ CREATE TABLE IF NOT EXISTS d1_sync_meta (
   schema_version TEXT DEFAULT '1.0.0'
 );
 
+-- 29. Chambers Expenses & Disbursements
+CREATE TABLE IF NOT EXISTS expenses (
+  id TEXT PRIMARY KEY,
+  branch_id TEXT,
+  account_type TEXT NOT NULL,
+  category TEXT NOT NULL,
+  amount REAL NOT NULL,
+  description TEXT NOT NULL,
+  date TEXT NOT NULL,
+  recorded_by_id TEXT NOT NULL,
+  recorded_by_name TEXT NOT NULL,
+  matter_id TEXT,
+  property_id TEXT,
+  receipt_ref TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- 30. Property Rental Units
+CREATE TABLE IF NOT EXISTS units (
+  id TEXT PRIMARY KEY,
+  property_id TEXT NOT NULL,
+  unit_number TEXT NOT NULL,
+  description TEXT NOT NULL,
+  annual_rent REAL NOT NULL,
+  status TEXT NOT NULL DEFAULT 'Vacant',
+  current_tenant_id TEXT,
+  FOREIGN KEY (property_id) REFERENCES properties(id)
+);
+
+-- 31. Rent Collection & Schedules
+CREATE TABLE IF NOT EXISTS rent_records (
+  id TEXT PRIMARY KEY,
+  tenancy_id TEXT NOT NULL,
+  tenant_name TEXT NOT NULL,
+  property_id TEXT NOT NULL,
+  unit_number TEXT NOT NULL,
+  amount_due REAL NOT NULL,
+  amount_paid REAL NOT NULL,
+  due_date TEXT NOT NULL,
+  payment_date TEXT,
+  status TEXT NOT NULL DEFAULT 'Arrears',
+  payment_reference TEXT,
+  receipt_number TEXT
+);
+
+-- 32. Law Student Internship Attendance
+CREATE TABLE IF NOT EXISTS internship_attendance (
+  id TEXT PRIMARY KEY,
+  student_id TEXT NOT NULL,
+  student_name TEXT NOT NULL,
+  date TEXT NOT NULL,
+  arrival_time TEXT NOT NULL,
+  departure_time TEXT,
+  status TEXT NOT NULL DEFAULT 'Present',
+  supervisor_notes TEXT,
+  logged_by_id TEXT NOT NULL
+);
+
+-- 33. Law Student Internship Evaluations
+CREATE TABLE IF NOT EXISTS internship_evaluations (
+  id TEXT PRIMARY KEY,
+  student_id TEXT NOT NULL,
+  student_name TEXT NOT NULL,
+  evaluation_date TEXT NOT NULL,
+  punctuality_rating INTEGER NOT NULL DEFAULT 5,
+  research_rating INTEGER NOT NULL DEFAULT 5,
+  drafting_rating INTEGER NOT NULL DEFAULT 5,
+  court_conduct_rating INTEGER NOT NULL DEFAULT 5,
+  overall_grade TEXT NOT NULL DEFAULT 'Distinction',
+  remarks TEXT,
+  evaluated_by_id TEXT NOT NULL
+);
+
+-- 34. Official Chambers Correspondence
+CREATE TABLE IF NOT EXISTS correspondence (
+  id TEXT PRIMARY KEY,
+  reference_number TEXT NOT NULL UNIQUE,
+  branch_id TEXT,
+  type TEXT NOT NULL,
+  date TEXT NOT NULL,
+  sender TEXT NOT NULL,
+  recipient TEXT NOT NULL,
+  subject TEXT NOT NULL,
+  content TEXT NOT NULL,
+  matter_id TEXT,
+  case_id TEXT,
+  client_id TEXT,
+  property_id TEXT,
+  logged_by_id TEXT NOT NULL
+);
+
+-- 35. Chambers Appointments & Conferences
+CREATE TABLE IF NOT EXISTS appointments (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  client_name TEXT NOT NULL,
+  phone TEXT,
+  email TEXT,
+  counsel_id TEXT NOT NULL,
+  appointment_type TEXT NOT NULL,
+  date TEXT NOT NULL,
+  time TEXT NOT NULL,
+  branch_id TEXT NOT NULL,
+  location TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'Scheduled',
+  notes TEXT
+);
+
 -- ==============================================================================
 -- INDEXES FOR FAST QUERYING & PERFORMANCE
 -- ==============================================================================
@@ -554,3 +662,5 @@ CREATE INDEX IF NOT EXISTS idx_payments_reference ON payments(payment_reference)
 CREATE INDEX IF NOT EXISTS idx_tenants_tracking ON tenants(tracking_code);
 CREATE INDEX IF NOT EXISTS idx_consultations_code ON consultations(code);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp);
+CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(date);
+CREATE INDEX IF NOT EXISTS idx_students_status ON students(status);
