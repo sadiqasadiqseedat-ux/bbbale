@@ -58,7 +58,7 @@ const INITIAL_USERS: User[] = [
     title: 'Senior Advocate of Nigeria / Principal Partner',
     practiceAreas: ['Constitutional Litigation', 'Appellate Advocacy', 'Energy & Natural Resources', 'Commercial Arbitration'],
     bio: 'Founding Partner and Senior Advocate of Nigeria with over three decades of exceptional legal practice.',
-    photoUrl: 'https://images.unsplash.com/photo-1556157382-97eda2d62296?auto=format&fit=crop&q=80&w=600',
+    photoUrl: '',
     availability: 'AVAILABLE',
     isPubliclyVisible: true,
     isActive: true,
@@ -664,6 +664,59 @@ export async function initializeStorage(): Promise<void> {
 }
 
 // STORE REPOSITORY API
+// BACKWARD-COMPATIBILITY SYNC API
+
+export function startAutoSync(intervalMs: number = 10000): () => void {
+  if (typeof window === 'undefined') {
+    return () => {};
+  }
+
+  let stopped = false;
+
+  const sync = () => {
+    if (!stopped) {
+      storageService.syncWithServer().catch(() => {});
+    }
+  };
+
+  // Sync immediately
+  sync();
+
+  // Sync every 10 seconds
+  const intervalId = window.setInterval(sync, intervalMs);
+
+  // Sync when the user returns to the tab
+  const handleFocus = () => sync();
+  window.addEventListener('focus', handleFocus);
+
+  // Stop synchronization when no longer needed
+  return () => {
+    stopped = true;
+    window.clearInterval(intervalId);
+    window.removeEventListener('focus', handleFocus);
+  };
+}
+
+export type DatabaseSaveState = {
+  status: 'idle' | 'saving' | 'saved' | 'error';
+  message: string;
+};
+
+export function subscribeToSaveStatus(
+  listener: (state: DatabaseSaveState) => void
+): () => void {
+  return subscribeToStore(() => {
+    try {
+      listener({
+        status: 'saved',
+        message: 'Cloudflare D1 Central Database'
+      });
+    } catch (error) {
+      console.error('Save status listener error:', error);
+    }
+  });
+}
+
 export const storageService = {
   // Authoritative D1 synchronization
   syncWithServer: async (): Promise<boolean> => {
@@ -899,16 +952,18 @@ export const storageService = {
   },
 
   // User CRUD
-  createUserAccount: async (data: any, actor: User): Promise<{ success: boolean; user?: User; error?: string }> => {
+    createUserAccount: async (data: any, actor: User): Promise<{ success: boolean; user?: User; error?: string }> => {
     if (actor.role !== 'PRINCIPAL_PARTNER' && actor.role !== 'HEAD_OF_CHAMBER') {
       return { success: false, error: 'Unauthorized: Only Principal Partner or Head of Chamber can provision accounts.' };
     }
 
     const cleanUsername = data.username.trim().toLowerCase();
     const cleanEmail = data.email.trim().toLowerCase();
+
     const existing = memory.users.find(
       u => u.username.toLowerCase() === cleanUsername || u.email.toLowerCase() === cleanEmail
     );
+
     if (existing) {
       return { success: false, error: 'Username or email already in use.' };
     }
@@ -920,7 +975,7 @@ export const storageService = {
       id: `usr-${Date.now()}`,
       username: cleanUsername,
       name: data.name,
-      email: data.email,
+      email: cleanEmail,
       phone: data.phone,
       role: data.role,
       branchId: data.branchId,
@@ -934,16 +989,48 @@ export const storageService = {
       accountStatus: 'Active',
       salt,
       passwordHash: hash,
-      requiresPasswordChange: true,
+      requiresPasswordChange: data.requirePasswordChange ?? true,
       failedLoginAttempts: 0,
       createdAt: new Date().toISOString()
     };
 
-    memory.users = [...memory.users, newUser];
-    setToStorage(STORAGE_KEYS.USERS, memory.users);
-    notifySubscribers();
-    logAudit(actor, 'CREATE_USER', 'User', newUser.id, `Created user: ${newUser.name} (${newUser.role})`);
-    return { success: true, user: newUser };
+    try {
+      const response = await apiFetch('/api/users', {
+        method: 'POST',
+        body: JSON.stringify(newUser)
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        return {
+          success: false,
+          error: errorText || 'Failed to save user to Cloudflare D1.'
+        };
+      }
+
+      memory.users = [...memory.users, newUser];
+      setToStorage(STORAGE_KEYS.USERS, memory.users);
+      notifySubscribers();
+
+      logAudit(
+        actor,
+        'CREATE_USER',
+        'User',
+        newUser.id,
+        `Created user: ${newUser.name} (${newUser.role})`
+      );
+
+      return { success: true, user: newUser };
+    } catch (error) {
+      console.error('Create user error:', error);
+
+      return {
+        success: false,
+        error: error instanceof Error
+          ? error.message
+          : 'Failed to save user to Cloudflare D1.'
+      };
+    }
   },
 
   updateUserAccount: (updatedUser: User, actor: User): { success: boolean; error?: string } => {
