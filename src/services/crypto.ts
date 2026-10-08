@@ -1,18 +1,18 @@
 /**
  * Cryptographic utilities for password hashing and verification using SHA-256 and salt.
  * Ensures passwords are never stored or transmitted in plain text.
+ * Compatible with Web Crypto API across Cloudflare Workers, Node.js 18+, and Modern Browsers.
  */
 
-// Get universal crypto object across browser, Cloudflare Workers, and Node.js
-const getCrypto = (): Crypto => {
+function getCrypto(): Crypto {
   if (typeof globalThis !== 'undefined' && globalThis.crypto) {
     return globalThis.crypto;
   }
   if (typeof window !== 'undefined' && window.crypto) {
     return window.crypto;
   }
-  throw new Error('Web Cryptography API is not available in this environment');
-};
+  throw new Error('Web Crypto API is not available in the current runtime environment');
+}
 
 // Generate a random cryptographic salt
 export function generateSalt(length: number = 16): string {
@@ -36,9 +36,9 @@ export async function verifyPassword(password: string, salt: string, storedHash:
   return computedHash === storedHash;
 }
 
-// Generate random secure token for temporary reset
-export function generateSecureToken(): string {
-  const array = new Uint8Array(24);
+// Generate random secure token for temporary reset or authenticated sessions
+export function generateSecureToken(length: number = 24): string {
+  const array = new Uint8Array(length);
   getCrypto().getRandomValues(array);
   return Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('');
 }

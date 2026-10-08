@@ -4,7 +4,9 @@ compatibility_date = "2024-04-01"
 
 [assets]
 directory = "./dist"
+binding = "ASSETS"
 
+# Cloudflare D1 Production Database Binding for B. B. Bale & Co. Chambers
 [[d1_databases]]
 binding = "DB"
 database_name = "bbbale"

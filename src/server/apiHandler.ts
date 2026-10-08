@@ -1,1939 +1,1563 @@
-/**
- * B. B. BALE & CO. CHAMBERS — CLOUDFLARE D1 / WORKER / PAGES API HANDLER
- * Central Server-Side Database Controller using Cloudflare D1 (env.DB binding)
- *
- * Provides authoritative relational CRUD, server-side role validation, audit logs,
- * cross-device synchronization, and zero-token architecture.
- */
+import { WorkerEnv, ExecutionContext, D1Database } from '../types/worker';
+import { 
+  User, 
+  UserRole, 
+  UserSession, 
+  Client, 
+  Consultation, 
+  Matter, 
+  CaseRecord, 
+  CaseAssignment, 
+  CourtDiaryEntry, 
+  Task, 
+  Invoice, 
+  PaymentRecord, 
+  Property, 
+  Landlord, 
+  Unit, 
+  Tenant, 
+  Tenancy, 
+  QuitNotice, 
+  StudentProfile, 
+  DocumentRecord, 
+  WebsiteContent, 
+  AuditLog, 
+  Branch 
+} from '../types';
+import { hashPassword, verifyPassword, generateSalt, generateSecureToken, validatePasswordStrength } from '../services/crypto';
 
-import { hashPassword, verifyPassword, generateSalt } from '../services/crypto';
-
-export interface Env {
-  DB: any; // Cloudflare D1Database binding
-  R2?: any; // Cloudflare R2Bucket binding (optional)
-}
-
-// 5 Initial Authorized Personnel (passwords set to admin@2026 on initial seed)
-const INITIAL_STAFF_SEEDS = [
-  {
-    id: 'usr-principal-01',
-    username: 'principal.partner',
-    name: 'Barrister B. B. Bale, SAN, FCIArb',
-    email: 'principal@bbbalechambers.ng',
-    phone: '+234 803 200 1100',
-    role: 'PRINCIPAL_PARTNER',
-    branch_id: 'br-abuja-01',
-    title: 'Senior Advocate of Nigeria / Principal Partner',
-    practice_areas: JSON.stringify(['Constitutional Litigation', 'Appellate Advocacy', 'Energy & Natural Resources', 'Commercial Arbitration']),
-    bio: 'Founding Partner and Senior Advocate of Nigeria with over three decades of exceptional legal practice, appearing before the Supreme Court of Nigeria and international arbitral tribunals.',
-    photo_url: 'https://images.unsplash.com/photo-1556157382-97eda2d62296?auto=format&fit=crop&q=80&w=600',
-    availability: 'AVAILABLE',
-    is_publicly_visible: 1,
-    is_active: 1,
-    account_status: 'Active',
-    salt: 'a1b2c3d4e5f60718'
-  },
-  {
-    id: 'usr-hoc-01',
-    username: 'head.chamber',
-    name: 'Barrister Aisha M. Bello, LL.M',
-    email: 'hoc.abuja@bbbalechambers.ng',
-    phone: '+234 802 333 4455',
-    role: 'HEAD_OF_CHAMBER',
-    branch_id: 'br-abuja-01',
-    title: 'Head of Chamber / Partner',
-    practice_areas: JSON.stringify(['Commercial Litigation', 'Sharia / Islamic Inheritance', 'Property Law', 'Corporate Governance']),
-    bio: 'Partner directing day-to-day Chambers operations, appellate brief drafting, and supervising counsel litigation assignments across superior courts of record.',
-    photo_url: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&q=80&w=600',
-    availability: 'IN_OFFICE',
-    is_publicly_visible: 1,
-    is_active: 1,
-    account_status: 'Active',
-    salt: 'b2c3d4e5f6071829'
-  },
-  {
-    id: 'usr-admin-01',
-    username: 'administrator',
-    name: 'Hajiya Fatima Garba, B.Sc, MPA',
-    email: 'admin@bbbalechambers.ng',
-    phone: '+234 805 111 2233',
-    role: 'ADMINISTRATOR_SECRETARY',
-    branch_id: 'br-abuja-01',
-    title: 'Chief Legal Registrar & Practice Administrator',
-    practice_areas: JSON.stringify(['Chambers Administration', 'Court Diary Management', 'Client Relations', 'Statutory Filings']),
-    bio: 'Experienced Practice Administrator managing Chambers intake registries, cause lists, client consultation schedules, and institutional correspondence.',
-    photo_url: 'https://images.unsplash.com/photo-1580894732454-defa48f40742?auto=format&fit=crop&q=80&w=600',
-    availability: 'AVAILABLE',
-    is_publicly_visible: 1,
-    is_active: 1,
-    account_status: 'Active',
-    salt: 'c3d4e5f60718293a'
-  },
-  {
-    id: 'usr-account-01',
-    username: 'accounts',
-    name: 'Chukwuemeka Okonkwo, ACA, ACTI',
-    email: 'accounts@bbbalechambers.ng',
-    phone: '+234 806 888 9900',
-    role: 'ACCOUNT_OFFICER',
-    branch_id: 'br-abuja-01',
-    title: 'Chief Financial & Account Officer',
-    practice_areas: JSON.stringify(['Client Trust Accounting', 'Tax & Compliance Audit', 'Real Estate Escrow']),
-    bio: 'Chartered Accountant overseeing client retainer accounting, consultation invoice verification, court filing disbursements, and property escrow records.',
-    photo_url: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=600',
-    availability: 'AVAILABLE',
-    is_publicly_visible: 1,
-    is_active: 1,
-    account_status: 'Active',
-    salt: 'd4e5f60718293a4b'
-  },
-  {
-    id: 'usr-counsel-01',
-    username: 'counsel',
-    name: 'Barrister Tunde Adeleke, BL',
-    email: 'tunde.adeleke@bbbalechambers.ng',
-    phone: '+234 813 444 7788',
-    role: 'COUNSEL_STAFF',
-    branch_id: 'br-abuja-01',
-    title: 'Senior Litigation & Property Associate',
-    practice_areas: JSON.stringify(['Recovery of Premises', 'High Court Litigation', 'Tenancy Disputes', 'Commercial Drafting']),
-    bio: 'Accomplished trial advocate specializing in tenancy litigation, recovery of premises under state tenancies laws, and appellate brief preparation.',
-    photo_url: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&q=80&w=600',
-    availability: 'IN_COURT',
-    is_publicly_visible: 1,
-    is_active: 1,
-    account_status: 'Active',
-    salt: 'e5f60718293a4b5c'
-  }
-];
-
-const INITIAL_BRANCHES_SEEDS = [
-  { id: 'br-abuja-01', name: 'Abuja Head Chambers', code: 'ABJ', address: 'Plot 742, Gabriel Olusanya Crescent, Off Constitution Avenue, Central Business District', city: 'Abuja', state: 'Federal Capital Territory (FCT)', phone: '+234 9 291 8000 / +234 803 200 1100', email: 'abuja@bbbalechambers.ng', head_of_chamber_id: 'usr-hoc-01', is_active: 1 },
-  { id: 'br-lagos-02', name: 'Lagos Island Chambers', code: 'LOS', address: '14th Floor, Investment House, 21-25 Broad Street, Lagos Island', city: 'Lagos', state: 'Lagos State', phone: '+234 1 454 9200', email: 'lagos@bbbalechambers.ng', head_of_chamber_id: null, is_active: 1 },
-  { id: 'br-kano-03', name: 'Kano Commercial Chambers', code: 'KAN', address: 'Suite 404, Gidan Goldie, 2 Race Course Road, Nassarawa GRA', city: 'Kano', state: 'Kano State', phone: '+234 64 982 110', email: 'kano@bbbalechambers.ng', head_of_chamber_id: null, is_active: 1 },
-  { id: 'br-ph-04', name: 'Port Harcourt Branch', code: 'PHC', address: '8 Forces Avenue, Old GRA', city: 'Port Harcourt', state: 'Rivers State', phone: '+234 84 301 440', email: 'portharcourt@bbbalechambers.ng', head_of_chamber_id: null, is_active: 1 }
-];
-
-const INITIAL_COURTS_SEEDS = [
-  { id: 'crt-01', name: 'Supreme Court of Nigeria', court_type: 'Supreme Court', state: 'FCT', judicial_division: 'Supreme Court Complex, Three Arms Zone, Abuja', location: 'Three Arms Zone, Abuja', default_judge: 'Chief Justice of Nigeria' },
-  { id: 'crt-02', name: 'Court of Appeal (Abuja Division)', court_type: 'Court of Appeal', state: 'FCT', judicial_division: 'Abuja Judicial Division', location: 'Shehu Shagari Way, Maitama, Abuja', default_judge: 'Presiding Justice, Court of Appeal' },
-  { id: 'crt-03', name: 'Federal High Court of Nigeria (Abuja)', court_type: 'Federal High Court', state: 'FCT', judicial_division: 'Abuja Judicial Division', location: 'Headquarters, Central Business District, Abuja', default_judge: 'Chief Judge, Federal High Court' },
-  { id: 'crt-04', name: 'High Court of the Federal Capital Territory', court_type: 'High Court', state: 'FCT', judicial_division: 'Maitama Judicial Division', location: 'Maitama, Abuja', default_judge: 'Chief Judge, FCT High Court' },
-  { id: 'crt-05', name: 'National Industrial Court of Nigeria', court_type: 'National Industrial Court', state: 'FCT', judicial_division: 'Abuja Judicial Division', location: 'Garki 2, Abuja', default_judge: 'President, National Industrial Court' }
-];
-
-const INITIAL_INSTITUTIONS_SEEDS = [
-  { id: 'inst-01', code: 'NLS-HQ', name: 'Nigerian Law School (Bwari Headquarters)', type: 'Nigerian Law School', address: 'Bwari, Federal Capital Territory, P.M.B. 1386', state: 'FCT', contact_person: 'Director of Academic Affairs / Placement Office', official_email: 'externship@lawschool.gov.ng', phone: '+234 9 290 5510', relationship_status: 'Active Partner' },
-  { id: 'inst-02', code: 'UNIABUJA-LAW', name: 'University of Abuja — Faculty of Law', type: 'Faculty of Law', address: 'Main Campus, Airport Road, Gwagwalada, Abuja', state: 'FCT', contact_person: 'Dean, Faculty of Law / Clinical Legal Education Unit', official_email: 'law.faculty@uniabuja.edu.ng', phone: '+234 803 555 4433', relationship_status: 'Active Partner' },
-  { id: 'inst-03', code: 'UNILAG-LAW', name: 'University of Lagos — Faculty of Law', type: 'Faculty of Law', address: 'Akoka, Yaba, Lagos', state: 'Lagos State', contact_person: 'Law Clinic & Clinical Education Coordinator', official_email: 'law@unilag.edu.ng', phone: '+234 1 280 2400', relationship_status: 'Active Partner' }
-];
-
-const INITIAL_NOTICES_SEEDS = [
-  {
-    id: 'not-01',
-    title: 'Chambers Working Hours & Client Consultation Schedule',
-    category: 'Office working hours',
-    content: 'B. B. BALE & CO. CHAMBERS operates Mondays through Fridays from 8:00 AM to 5:30 PM across all branches. In-person client conferences and virtual consultations are scheduled strictly upon prior verification and booking via the Chambers Public Portal.',
-    publish_date: '2026-01-05',
-    status: 'Published',
-    published_by_id: 'usr-principal-01',
-    published_by_name: 'Barrister B. B. Bale, SAN'
-  },
-  {
-    id: 'not-02',
-    title: 'Nigerian Law School Externship & 2026 Student Internship Call',
-    category: 'Internship announcements',
-    content: 'Chambers welcomes Bar Part II externs from the Nigerian Law School and penultimate/final year LL.B law undergraduates. Applications or official institution referral letters may be submitted via the Chambers Student Portal. Each placement candidate is assigned a Senior Counsel supervisor.',
-    publish_date: '2026-02-01',
-    status: 'Published',
-    published_by_id: 'usr-hoc-01',
-    published_by_name: 'Barrister Aisha M. Bello, LL.M'
-  }
-];
-
-const INITIAL_CMS_SEED = {
-  id: 'cms-main',
-  tagline: 'Secure. Organized. Professional.',
-  hero_headline: 'Secure. Organized. Professional.',
-  hero_subheadline: 'Distinguished legal representation, trial advocacy, property & recovery of premises management, Islamic law jurisprudence, and institutional law-student mentorship across Nigeria.',
-  about_story: 'B. B. BALE & CO. CHAMBERS was established to provide distinguished corporate entities, institutions, and individuals with uncompromising legal defense and advisory services. From our principal chambers in the Federal Capital Territory, Abuja, our footprint extends across commercial hubs in Lagos, Kano, and Port Harcourt. Our trial and appellate practice is built on comprehensive statutory analysis, painstaking factual investigation, and respectful yet incisive courtroom advocacy.',
-  about_founding_year: '1996',
-  office_hours_text: 'Mondays through Fridays: 8:00 AM - 5:30 PM (Court Recess Excluded). In-person client conferences and virtual consultations are scheduled upon verified booking.',
-  emergency_hotline: '+234 803 200 1100',
-  consultation_fee_standard: 35000,
-  internship_policy_notice: 'Chambers welcomes Bar Part II externs from the Nigerian Law School and law undergraduates from recognized universities.',
-  recovery_of_premises_notice: 'Statutory notice periods must not be mechanically applied; each notice is formulated in accordance with applicable State tenancy legislation and agreements.',
-  invoice_bank_name: 'First Bank of Nigeria PLC',
-  invoice_account_name: 'B. B. BALE & CO. (CLIENT SERVICES)',
-  invoice_account_number: '2039485712',
-  invoice_payment_method: 'Direct Electronic Transfer (NIP) / Chambers Retainer Account',
-  last_updated: '2026-01-01T00:00:00.000Z',
-  updated_by: 'Barrister B. B. Bale, SAN'
+const CORS_HEADERS: Record<string, string> = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+  'Content-Type': 'application/json'
 };
 
-// Response helper
 function jsonResponse(data: any, status: number = 200): Response {
   return new Response(JSON.stringify(data), {
     status,
-    headers: {
-      'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-User-Role, X-User-Id'
-    }
+    headers: CORS_HEADERS
   });
 }
 
-function errorResponse(error: string, status: number = 400): Response {
-  return jsonResponse({ success: false, error }, status);
+function errorResponse(message: string, status: number = 400): Response {
+  return new Response(JSON.stringify({ success: false, error: message }), {
+    status,
+    headers: CORS_HEADERS
+  });
 }
 
-// Sequential counter helper in D1
-async function getNextD1Number(db: any, type: string, prefix: string): Promise<string> {
+// Extract authenticated user from session token
+async function getAuthUser(request: Request, db: D1Database): Promise<{ user: User; session: UserSession } | null> {
+  const authHeader = request.headers.get('Authorization');
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return null;
+  }
+  const token = authHeader.replace('Bearer ', '').trim();
+  if (!token) return null;
+
   try {
-    const existing = await db.prepare('SELECT current_count FROM system_counters WHERE type = ?').bind(type).first();
-    const current = (existing?.current_count || 0) + 1;
-    await db.prepare(`
-      INSERT INTO system_counters (id, type, current_count, updated_at)
-      VALUES (?, ?, ?, datetime('now'))
-      ON CONFLICT(type) DO UPDATE SET current_count = ?, updated_at = datetime('now')
-    `).bind(`cnt-${type}`, type, current, current).run();
-    const formatted = String(current).padStart(6, '0');
-    return `BBC-${prefix}-2026-${formatted}`;
-  } catch {
-    const fallback = String(Math.floor(Math.random() * 900000) + 100000);
-    return `BBC-${prefix}-2026-${fallback}`;
+    const sessionRow = await db.prepare(
+      `SELECT s.token, s.user_id, s.role, s.branch_id, s.expires_at, s.last_active_at,
+              u.id, u.username, u.name, u.email, u.phone, u.role as user_role, u.branch_id as user_branch,
+              u.title, u.practice_areas, u.bio, u.photo_url, u.availability, u.is_publicly_visible,
+              u.is_active, u.account_status, u.requires_password_change, u.created_at
+       FROM user_sessions s
+       JOIN users u ON s.user_id = u.id
+       WHERE s.token = ?`
+    ).bind(token).first<any>();
+
+    if (!sessionRow) return null;
+
+    // Check expiry
+    const expiresAt = new Date(sessionRow.expires_at).getTime();
+    if (expiresAt < Date.now()) {
+      await db.prepare('DELETE FROM user_sessions WHERE token = ?').bind(token).run();
+      return null;
+    }
+
+    // Touch session
+    await db.prepare(
+      "UPDATE user_sessions SET last_active_at = datetime('now') WHERE token = ?"
+    ).bind(token).run();
+
+    const user: User = {
+      id: sessionRow.id,
+      username: sessionRow.username,
+      name: sessionRow.name,
+      email: sessionRow.email,
+      phone: sessionRow.phone,
+      role: sessionRow.user_role as UserRole,
+      branchId: sessionRow.user_branch,
+      title: sessionRow.title,
+      practiceAreas: typeof sessionRow.practice_areas === 'string' ? JSON.parse(sessionRow.practice_areas || '[]') : [],
+      bio: sessionRow.bio || '',
+      photoUrl: sessionRow.photo_url || '',
+      availability: sessionRow.availability || 'AVAILABLE',
+      isPubliclyVisible: Boolean(sessionRow.is_publicly_visible),
+      isActive: Boolean(sessionRow.is_active),
+      accountStatus: sessionRow.account_status || 'Active',
+      passwordHash: '',
+      salt: '',
+      requiresPasswordChange: Boolean(sessionRow.requires_password_change),
+      failedLoginAttempts: 0,
+      createdAt: sessionRow.created_at
+    };
+
+    const session: UserSession = {
+      userId: sessionRow.user_id,
+      token: sessionRow.token,
+      role: sessionRow.role as UserRole,
+      branchId: sessionRow.branch_id,
+      rememberMe: true,
+      expiresAt: sessionRow.expires_at,
+      lastActiveAt: sessionRow.last_active_at
+    };
+
+    return { user, session };
+  } catch (err) {
+    console.error('Session lookup error:', err);
+    return null;
   }
 }
 
-// Log audit event to D1
-async function logD1Audit(db: any, actor: { id?: string; name?: string; role?: string }, action: string, entity: string, entityId: string, details: string) {
+// Generate serial numbers using system_counters in D1
+async function getNextNumber(db: D1Database, type: string, prefix: string): Promise<string> {
   try {
-    const auditId = `audit-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-    await db.prepare(`
-      INSERT INTO audit_logs (id, timestamp, user_id, user_name, user_role, action, entity, entity_id, details)
-      VALUES (?, datetime('now'), ?, ?, ?, ?, ?, ?, ?)
-    `).bind(
-      auditId,
-      actor.id || 'system',
-      actor.name || 'System Actor',
-      actor.role || 'ADMINISTRATOR_SECRETARY',
+    await db.prepare(
+      `INSERT INTO system_counters (id, type, current_count, updated_at)
+       VALUES (?, ?, 1, datetime('now'))
+       ON CONFLICT(type) DO UPDATE SET current_count = current_count + 1, updated_at = datetime('now');`
+    ).bind(`cnt-${type}`, type).run();
+
+    const row = await db.prepare('SELECT current_count FROM system_counters WHERE type = ?').bind(type).first<{ current_count: number }>();
+    const count = row ? row.current_count : 1;
+    const formatted = String(count).padStart(6, '0');
+    return `BBC-${prefix}-2026-${formatted}`;
+  } catch {
+    const random = Math.floor(100000 + Math.random() * 900000);
+    return `BBC-${prefix}-2026-${random}`;
+  }
+}
+
+// Ensure database tables exist & seed default accounts if empty
+async function ensureBootstrap(db: D1Database): Promise<void> {
+  try {
+    // Check if users exist
+    const userCount = await db.prepare('SELECT COUNT(*) as count FROM users').first<{ count: number }>();
+    if (userCount && userCount.count > 0) {
+      return; // Already bootstrapped
+    }
+
+    const defaultSetupPassword = 'admin@2026';
+
+    // 1. Seed Branches
+    await db.prepare(
+      `INSERT OR IGNORE INTO branches (id, name, code, address, city, state, phone, email, is_active)
+       VALUES 
+       ('br-abuja-01', 'Abuja Head Chambers', 'ABJ', 'Plot 742, Gabriel Olusanya Crescent, CBD', 'Abuja', 'FCT', '+234 9 291 8000', 'abuja@bbbalechambers.ng', 1),
+       ('br-lagos-02', 'Lagos Island Chambers', 'LOS', '14th Floor, Investment House, Broad Street', 'Lagos', 'Lagos State', '+234 1 454 9200', 'lagos@bbbalechambers.ng', 1),
+       ('br-kano-03', 'Kano Commercial Chambers', 'KAN', 'Suite 404, Gidan Goldie, Nassarawa GRA', 'Kano', 'Kano State', '+234 64 982 110', 'kano@bbbalechambers.ng', 1),
+       ('br-ph-04', 'Port Harcourt Branch', 'PHC', '8 Forces Avenue, Old GRA', 'Port Harcourt', 'Rivers State', '+234 84 301 440', 'portharcourt@bbbalechambers.ng', 1);`
+    ).run();
+
+    // 2. Seed Initial 5 Authorized Accounts
+    const initialUsers = [
+      {
+        id: 'usr-principal-01',
+        username: 'principal.partner',
+        name: 'Barrister B. B. Bale, SAN, FCIArb',
+        email: 'principal@bbbalechambers.ng',
+        phone: '+234 803 200 1100',
+        role: 'PRINCIPAL_PARTNER',
+        branchId: 'br-abuja-01',
+        title: 'Senior Advocate of Nigeria / Principal Partner',
+        practiceAreas: JSON.stringify(['Constitutional Litigation', 'Appellate Advocacy', 'Energy & Natural Resources', 'Commercial Arbitration']),
+        bio: 'Founding Partner and Senior Advocate of Nigeria with over three decades of exceptional legal practice.',
+        salt: 'a1b2c3d4e5f60718'
+      },
+      {
+        id: 'usr-hoc-01',
+        username: 'head.chamber',
+        name: 'Barrister Aisha M. Bello, LL.M',
+        email: 'hoc.abuja@bbbalechambers.ng',
+        phone: '+234 802 333 4455',
+        role: 'HEAD_OF_CHAMBER',
+        branchId: 'br-abuja-01',
+        title: 'Partner / Head of Chamber (Abuja)',
+        practiceAreas: JSON.stringify(['Corporate & Commercial', 'Property & Real Estate Law', 'Islamic Jurisprudence']),
+        bio: 'Partner directing the day-to-day legal operations of the Abuja Head Chambers.',
+        salt: 'b2c3d4e5f6071829'
+      },
+      {
+        id: 'usr-admin-01',
+        username: 'administrator',
+        name: 'Fatima Garba, B.Sc, CIPM',
+        email: 'secretary@bbbalechambers.ng',
+        phone: '+234 809 555 1212',
+        role: 'ADMINISTRATOR_SECRETARY',
+        branchId: 'br-abuja-01',
+        title: 'Chambers Administrator & Legal Secretary',
+        practiceAreas: JSON.stringify(['Court Filings & Cause Lists', 'Client Intake', 'Legal Drafting Management']),
+        bio: 'Oversees chambers intake and secretarial administration.',
+        salt: 'c3d4e5f60718293a'
+      },
+      {
+        id: 'usr-accounts-01',
+        username: 'accounts',
+        name: 'Chukwudi Nnamdi, ACA',
+        email: 'accounts@bbbalechambers.ng',
+        phone: '+234 805 777 8899',
+        role: 'ACCOUNT_OFFICER',
+        branchId: 'br-abuja-01',
+        title: 'Principal Financial Accountant',
+        practiceAreas: JSON.stringify(['Client Escrow Management', 'Retainer Accounting', 'Tax & Compliance']),
+        bio: 'Directs billing, fee notes, and financial accounting.',
+        salt: 'd4e5f60718293a4b'
+      },
+      {
+        id: 'usr-counsel-01',
+        username: 'counsel',
+        name: 'Barrister Tunde Adeleke, BL',
+        email: 'tunde.adeleke@bbbalechambers.ng',
+        phone: '+234 813 444 7788',
+        role: 'COUNSEL_STAFF',
+        branchId: 'br-abuja-01',
+        title: 'Senior Litigation & Property Associate',
+        practiceAreas: JSON.stringify(['Recovery of Premises', 'High Court Litigation', 'Tenancy Disputes']),
+        bio: 'Accomplished trial advocate specializing in tenancy litigation.',
+        salt: 'e5f60718293a4b5c'
+      }
+    ];
+
+    for (const u of initialUsers) {
+      const hash = await hashPassword(defaultSetupPassword, u.salt);
+      await db.prepare(
+        `INSERT OR IGNORE INTO users 
+         (id, username, name, email, phone, role, branch_id, title, practice_areas, bio, photo_url, availability, is_publicly_visible, is_active, account_status, password_hash, salt, requires_password_change)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, 'Active', ?, ?, 1)`
+      ).bind(
+        u.id, u.username, u.name, u.email, u.phone, u.role, u.branchId, u.title,
+        u.practiceAreas, u.bio, '', 'AVAILABLE', hash, u.salt
+      ).run();
+    }
+
+    // 3. Seed Website CMS Content
+    await db.prepare(
+      `INSERT OR IGNORE INTO website_content 
+       (id, tagline, hero_headline, hero_subheadline, about_story, about_founding_year, office_hours_text, emergency_hotline, consultation_fee_standard, internship_policy_notice, recovery_of_premises_notice, invoice_bank_name, invoice_account_name, invoice_account_number, invoice_payment_method, last_updated, updated_by)
+       VALUES 
+       ('cms-main', 'Secure. Organized. Professional.', 'Secure. Organized. Professional.',
+        'Distinguished legal representation, trial advocacy, property & recovery of premises management, Islamic law jurisprudence, and institutional law-student mentorship across Nigeria.',
+        'B. B. BALE & CO. CHAMBERS was established to provide distinguished corporate entities, institutions, and individuals with uncompromising legal defense and advisory services.',
+        '1996', 'Mondays through Fridays: 8:00 AM - 5:30 PM. In-person client conferences and virtual consultations are scheduled upon verified booking.',
+        '+234 803 200 1100', 35000,
+        'Chambers welcomes Bar Part II externs from the Nigerian Law School and law undergraduates from recognized universities.',
+        'Statutory notice periods must not be mechanically applied; each notice is formulated in accordance with applicable State tenancy legislation.',
+        'First Bank of Nigeria PLC', 'B. B. BALE & CO. (CLIENT SERVICES)', '2039485712', 'Bank Transfer',
+        datetime('now'), 'Chambers Administration');`
+    ).run();
+
+  } catch (err) {
+    console.error('Bootstrap error (non-fatal):', err);
+  }
+}
+
+// Log audit trail to D1
+async function logAudit(
+  db: D1Database,
+  userId: string,
+  userName: string,
+  userRole: string,
+  action: string,
+  entity: string,
+  entityId: string,
+  details: string
+): Promise<void> {
+  try {
+    await db.prepare(
+      `INSERT INTO audit_logs (id, timestamp, user_id, user_name, user_role, action, entity, entity_id, details)
+       VALUES (?, datetime('now'), ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      `audit-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      userId,
+      userName,
+      userRole,
       action,
       entity,
       entityId,
       details
     ).run();
-  } catch (err) {
-    console.error('Failed to log D1 audit event:', err);
-  }
-}
-
-// Seed initial authentic accounts and data if tables exist but users is empty
-export async function seedD1InitialData(db: any): Promise<boolean> {
-  try {
-    const userCount = await db.prepare('SELECT count(*) as count FROM users').first('count');
-    if (userCount && Number(userCount) > 0) {
-      return false; // Already populated
-    }
-
-    const defaultPassword = 'admin@2026';
-
-    try {
-      await db.exec?.('PRAGMA foreign_keys = OFF;');
-    } catch {}
-
-    // 1. Seed initial branches FIRST (required by users foreign key branch_id)
-    for (const b of INITIAL_BRANCHES_SEEDS) {
-      await db.prepare(`
-        INSERT OR IGNORE INTO branches (id, name, code, address, city, state, phone, email, head_of_chamber_id, is_active)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).bind(b.id, b.name, b.code, b.address, b.city, b.state, b.phone, b.email, b.head_of_chamber_id, b.is_active).run();
-    }
-
-    // 2. Seed initial 5 personnel
-    for (const u of INITIAL_STAFF_SEEDS) {
-      const hash = await hashPassword(defaultPassword, u.salt);
-      await db.prepare(`
-        INSERT OR IGNORE INTO users (
-          id, username, name, email, phone, role, branch_id, title,
-          practice_areas, bio, photo_url, availability, is_publicly_visible,
-          is_active, account_status, password_hash, salt, requires_password_change,
-          failed_login_attempts, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, datetime('now'))
-      `).bind(
-        u.id, u.username, u.name, u.email, u.phone, u.role, u.branch_id, u.title,
-        u.practice_areas, u.bio, u.photo_url, u.availability, u.is_publicly_visible,
-        u.is_active, u.account_status, hash, u.salt
-      ).run();
-    }
-
-    // 3. Seed courts
-    for (const c of INITIAL_COURTS_SEEDS) {
-      await db.prepare(`
-        INSERT OR IGNORE INTO courts (id, name, court_type, state, judicial_division, location, default_judge)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).bind(c.id, c.name, c.court_type, c.state, c.judicial_division, c.location, c.default_judge).run();
-    }
-
-    // 4. Seed institutions
-    for (const inst of INITIAL_INSTITUTIONS_SEEDS) {
-      await db.prepare(`
-        INSERT OR IGNORE INTO partner_institutions (id, code, name, type, address, state, contact_person, official_email, phone, relationship_status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).bind(inst.id, inst.code, inst.name, inst.type, inst.address, inst.state, inst.contact_person, inst.official_email, inst.phone, inst.relationship_status).run();
-    }
-
-    // 5. Seed notices
-    for (const n of INITIAL_NOTICES_SEEDS) {
-      await db.prepare(`
-        INSERT OR IGNORE INTO public_notices (id, title, category, content, publish_date, status, published_by_id, published_by_name)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `).bind(n.id, n.title, n.category, n.content, n.publish_date, n.status, n.published_by_id, n.published_by_name).run();
-    }
-
-    // 6. Seed website content
-    await db.prepare(`
-      INSERT OR REPLACE INTO website_content (
-        id, tagline, hero_headline, hero_subheadline, about_story, about_founding_year,
-        office_hours_text, emergency_hotline, consultation_fee_standard,
-        internship_policy_notice, recovery_of_premises_notice, invoice_bank_name,
-        invoice_account_name, invoice_account_number, invoice_payment_method,
-        last_updated, updated_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).bind(
-      INITIAL_CMS_SEED.id, INITIAL_CMS_SEED.tagline, INITIAL_CMS_SEED.hero_headline, INITIAL_CMS_SEED.hero_subheadline,
-      INITIAL_CMS_SEED.about_story, INITIAL_CMS_SEED.about_founding_year, INITIAL_CMS_SEED.office_hours_text,
-      INITIAL_CMS_SEED.emergency_hotline, INITIAL_CMS_SEED.consultation_fee_standard,
-      INITIAL_CMS_SEED.internship_policy_notice, INITIAL_CMS_SEED.recovery_of_premises_notice,
-      INITIAL_CMS_SEED.invoice_bank_name, INITIAL_CMS_SEED.invoice_account_name,
-      INITIAL_CMS_SEED.invoice_account_number, INITIAL_CMS_SEED.invoice_payment_method,
-      INITIAL_CMS_SEED.last_updated, INITIAL_CMS_SEED.updated_by
-    ).run();
-
-    return true;
-  } catch (err) {
-    console.error('Error during D1 initial seed:', err);
-    return false;
+  } catch (e) {
+    console.error('Audit log failed:', e);
   }
 }
 
 /**
- * Main Cloudflare Worker / Pages Function API Request Handler
+ * Main Cloudflare Worker API router
  */
-export async function handleApiRequest(request: Request, env: Env): Promise<Response> {
+export async function handleApiRequest(
+  request: Request,
+  env: WorkerEnv,
+  _ctx?: ExecutionContext
+): Promise<Response> {
+  if (request.method === 'OPTIONS') {
+    return new Response(null, { headers: CORS_HEADERS });
+  }
+
   const url = new URL(request.url);
   const path = url.pathname;
-  const method = request.method.toUpperCase();
-
-  // Handle CORS Preflight
-  if (method === 'OPTIONS') {
-    return new Response(null, {
-      status: 204,
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-User-Role, X-User-Id'
-      }
-    });
-  }
-
   const db = env.DB;
+
   if (!db) {
-    return errorResponse('Cloudflare D1 Database binding "env.DB" is not available on this worker instance.', 500);
+    return errorResponse('Cloudflare D1 database binding "DB" is not available in environment.', 500);
   }
+
+  // Ensure bootstrap on first hit
+  await ensureBootstrap(db);
 
   try {
-    // =========================================================================
-    // 1. D1 DIAGNOSTICS & SYSTEM MIGRATIONS
-    // =========================================================================
+    // --------------------------------------------------------------------------
+    // 1. HEALTH & STATUS
+    // --------------------------------------------------------------------------
+    if (path === '/api/health') {
+      const clientCount = await db.prepare('SELECT COUNT(*) as count FROM clients').first<{ count: number }>().catch(() => ({ count: 0 }));
+      const userCount = await db.prepare('SELECT COUNT(*) as count FROM users').first<{ count: number }>().catch(() => ({ count: 0 }));
+      const caseCount = await db.prepare('SELECT COUNT(*) as count FROM cases').first<{ count: number }>().catch(() => ({ count: 0 }));
+      const invoiceCount = await db.prepare('SELECT COUNT(*) as count FROM invoices').first<{ count: number }>().catch(() => ({ count: 0 }));
 
-    // GET /api/d1/status — Cloudflare D1 real-time health and row count verification
-    if (path === '/api/d1/status' && method === 'GET') {
-      try {
-        const tableCheck = await db.prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%'").all();
-        const tables = (tableCheck.results || []).map((t: any) => t.name);
-
-        const counts: Record<string, number> = {};
-        for (const t of tables) {
-          try {
-            const countRow = await db.prepare(`SELECT count(*) as c FROM "${t}"`).first();
-            counts[t] = countRow?.c ?? 0;
-          } catch {
-            counts[t] = 0;
-          }
+      return jsonResponse({
+        success: true,
+        status: 'healthy',
+        database: 'Cloudflare D1 (binding: DB)',
+        timestamp: new Date().toISOString(),
+        counts: {
+          users: userCount?.count || 0,
+          clients: clientCount?.count || 0,
+          cases: caseCount?.count || 0,
+          invoices: invoiceCount?.count || 0
         }
-
-        return jsonResponse({
-          success: true,
-          connected: true,
-          databaseBinding: 'env.DB',
-          totalTables: tables.length,
-          tables,
-          recordCounts: counts,
-          timestamp: new Date().toISOString()
-        });
-      } catch (err: any) {
-        return errorResponse(`Failed connecting to Cloudflare D1: ${err.message}`, 500);
-      }
-    }
-
-    // POST /api/d1/migrate — Verify or run D1 Schema and Seed Initial Personnel
-    if (path === '/api/d1/migrate' && method === 'POST') {
-      try {
-        const seeded = await seedD1InitialData(db);
-        return jsonResponse({
-          success: true,
-          message: seeded 
-            ? 'Cloudflare D1 schema verified and initial Chambers personnel seeded.'
-            : 'Cloudflare D1 tables verified. Existing database records preserved.',
-          seeded
-        });
-      } catch (err: any) {
-        return errorResponse(`Migration error: ${err.message}`, 500);
-      }
-    }
-
-    // POST /api/d1/query — Safe Principal Partner SQL Diagnostics Console
-    if (path === '/api/d1/query' && method === 'POST') {
-      const body = await request.json().catch(() => ({}));
-      const sql = (body.sql || '').trim();
-      if (!sql) return errorResponse('Missing SQL statement');
-
-      // Security check: only SELECT / PRAGMA queries allowed via web console
-      const normalized = sql.toUpperCase();
-      if (normalized.startsWith('DROP ') || normalized.startsWith('DELETE ') || normalized.startsWith('UPDATE ') || normalized.startsWith('ALTER ')) {
-        return errorResponse('Console queries are restricted to non-destructive inspection (SELECT, PRAGMA, EXPLAIN).', 403);
-      }
-
-      const res = await db.prepare(sql).bind(...(body.params || [])).all();
-      return jsonResponse({
-        success: true,
-        results: res.results || [],
-        meta: res.meta || {}
       });
     }
 
-    // =========================================================================
-    // 2. COMPREHENSIVE CROSS-DEVICE SYNCHRONIZATION
-    // =========================================================================
-
-    // GET /api/sync/all — Fetches all firm records in one query bundle for instant cross-device sync
-    if (path === '/api/sync/all' && method === 'GET') {
-      // Ensure seed if brand new D1 database
-      await seedD1InitialData(db);
-
-      const [
-        branchesRes,
-        usersRes,
-        courtsRes,
-        institutionsRes,
-        clientsRes,
-        consultationsRes,
-        mattersRes,
-        casesRes,
-        assignmentsRes,
-        diaryRes,
-        tasksRes,
-        propertiesRes,
-        landlordsRes,
-        tenantsRes,
-        tenanciesRes,
-        quitNoticesRes,
-        invoicesRes,
-        paymentsRes,
-        expensesRes,
-        studentsRes,
-        researchRes,
-        documentsRes,
-        noticesRes,
-        enquiriesRes,
-        approvalsRes,
-        auditLogsRes,
-        websiteContentRes,
-        unitsRes,
-        rentRecordsRes,
-        correspondenceRes,
-        appointmentsRes,
-        attendanceRes,
-        evaluationsRes,
-        disputesRes,
-        receiptsRes
-      ] = await Promise.all([
-        db.prepare('SELECT id, name, code, address, city, state, phone, email, head_of_chamber_id as headOfChamberId, is_active as isActive FROM branches').all(),
-        db.prepare(`
-          SELECT id, username, name, email, phone, role, branch_id as branchId, title,
-                 practice_areas as practiceAreas, bio, photo_url as photoUrl, availability,
-                 is_publicly_visible as isPubliclyVisible, is_active as isActive,
-                 account_status as accountStatus, requires_password_change as requiresPasswordChange,
-                 failed_login_attempts as failedLoginAttempts, last_login as lastLogin,
-                 password_changed_at as passwordChangedAt, created_at as createdAt
-          FROM users
-        `).all(),
-        db.prepare('SELECT id, name, court_type as courtType, state, judicial_division as judicialDivision, location, default_judge as defaultJudge FROM courts').all(),
-        db.prepare('SELECT id, code, name, type, address, state, contact_person as contactPerson, official_email as officialEmail, phone, relationship_status as relationshipStatus, notes FROM partner_institutions').all(),
-        db.prepare(`
-          SELECT id, client_id as clientId, full_name as fullName, organization, client_type as clientType,
-                 phone, email, address, state, lga, identification_type as identificationType,
-                 identification_number as identificationNumber, branch_id as branchId,
-                 assigned_lawyer_id as assignedLawyerId, conflict_check_status as conflictCheckStatus,
-                 conflict_check_notes as conflictCheckNotes, conflict_reviewed_by as conflictReviewedBy,
-                 date_registered as dateRegistered, is_active as isActive, confidential_notes as confidentialNotes
-          FROM clients ORDER BY created_at DESC
-        `).all(),
-        db.prepare(`
-          SELECT id, code, service_category as serviceCategory, preferred_date as preferredDate,
-                 preferred_time as preferredTime, full_name as fullName, phone, email, method,
-                 brief_enquiry as briefEnquiry, supporting_documents as supportingDocuments,
-                 status, invoice_number as invoiceNumber, payment_reference as paymentReference,
-                 branch_id as branchId, assigned_lawyer_id as assignedLawyerId,
-                 client_visible_update as clientVisibleUpdate, created_at as createdAt
-          FROM consultations ORDER BY created_at DESC
-        `).all(),
-        db.prepare(`
-          SELECT id, matter_id as matterId, title, client_id as clientId, branch_id as branchId,
-                 lead_counsel_id as leadCounselId, category, status, stage, engagement_date as engagementDate,
-                 client_visible_update as clientVisibleUpdate, privileged_internal_notes as privilegedInternalNotes,
-                 requires_principal_approval as requiresPrincipalApproval, principal_approval_status as principalApprovalStatus,
-                 created_at as createdAt
-          FROM matters ORDER BY created_at DESC
-        `).all(),
-        db.prepare(`
-          SELECT id, case_id as caseId, suit_number as suitNumber, matter_id as matterId,
-                 client_id as clientId, branch_id as branchId, court_id as courtId,
-                 judicial_division as judicialDivision, judge, counsel_id as counselId,
-                 opposing_party as opposingParty, opposing_counsel as opposingCounsel,
-                 case_type as caseType, subject_matter as subjectMatter, filing_date as filingDate,
-                 next_court_date as nextCourtDate, status, client_visible_update as clientVisibleUpdate,
-                 internal_strategy_notes as internalStrategyNotes, created_at as createdAt
-          FROM cases ORDER BY created_at DESC
-        `).all(),
-        db.prepare(`
-          SELECT id, case_id as caseId, suit_number as suitNumber, branch_id as branchId,
-                 counsel_id as counselId, assigned_by_id as assignedById, assigned_by_name as assignedByName,
-                 date_assigned as dateAssigned, status, rejection_reason as rejectionReason,
-                 rejection_notes as rejectionNotes, response_date as responseDate
-          FROM case_assignments ORDER BY date_assigned DESC
-        `).all(),
-        db.prepare(`
-          SELECT id, case_id as caseId, suit_number as suitNumber, branch_id as branchId,
-                 court_date as courtDate, court_time as courtTime, court_name as courtName,
-                 counsel_id as counselId, client_id as clientId, purpose, status,
-                 outcome_summary as outcomeSummary, next_court_date as nextCourtDate, notes
-          FROM court_diary ORDER BY court_date DESC
-        `).all(),
-        db.prepare(`
-          SELECT id, title, assigned_to_id as assignedToId, assigned_by_id as assignedById,
-                 branch_id as branchId, matter_id as matterId, case_id as caseId,
-                 priority, due_date as dueDate, status, completion_date as completionDate,
-                 notes, created_at as createdAt
-          FROM tasks ORDER BY created_at DESC
-        `).all(),
-        db.prepare(`
-          SELECT id, property_id as propertyId, branch_id as branchId, name,
-                 property_type as propertyType, address, state, lga, district,
-                 landlord_id as landlordId, total_units as totalUnits,
-                 title_information as titleInformation, survey_information as surveyInformation,
-                 legal_status as legalStatus, assigned_lawyer_id as assignedLawyerId,
-                 related_client_id as relatedClientId, related_matter_id as relatedMatterId,
-                 notes, created_at as createdAt
-          FROM properties ORDER BY created_at DESC
-        `).all(),
-        db.prepare(`
-          SELECT id, landlord_id as landlordId, full_name as fullName, phone, email,
-                 address, bank_details as bankDetails, tracking_code as trackingCode,
-                 date_registered as dateRegistered
-          FROM landlords ORDER BY date_registered DESC
-        `).all(),
-        db.prepare(`
-          SELECT id, tenant_id as tenantId, full_name as fullName, phone, email,
-                 landlord_id as landlordId, property_id as propertyId, unit_number as unitNumber,
-                 tracking_code as trackingCode, occupation, status, date_registered as dateRegistered
-          FROM tenants ORDER BY date_registered DESC
-        `).all(),
-        db.prepare(`
-          SELECT id, tenant_id as tenantId, property_id as propertyId, unit_number as unitNumber,
-                 rent_amount as rentAmount, start_date as startDate, expiry_date as expiryDate,
-                 payment_frequency as paymentFrequency, status, arrears_amount as arrearsAmount,
-                 tenancy_agreement_doc_id as tenancyAgreementDocId
-          FROM tenancies
-        `).all(),
-        db.prepare(`
-          SELECT id, quit_notice_id as quitNoticeId, tenant_id as tenantId, tenant_name as tenantName,
-                 property_id as propertyId, property_name as propertyName, landlord_id as landlordId,
-                 landlord_name as landlordName, unit_number as unitNumber, notice_type as noticeType,
-                 notice_date as noticeDate, notice_expiry_date as noticeExpiryDate, reason,
-                 statutory_basis as statutoryBasis, status, issued_by_id as issuedById,
-                 issued_by_name as issuedByName, created_at as createdAt
-          FROM quit_notices ORDER BY created_at DESC
-        `).all(),
-        db.prepare(`
-          SELECT id, invoice_number as invoiceNumber, client_id as clientId, client_name as clientName,
-                 client_email as clientEmail, client_phone as clientPhone, matter_id as matterId,
-                 branch_id as branchId, consultation_id as consultationId, consultation_code as consultationCode,
-                 items, subtotal, tax_amount as taxAmount, total_amount as totalAmount,
-                 date, due_date as dueDate, payment_status as paymentStatus,
-                 approval_status as approvalStatus, approval_request_id as approvalRequestId,
-                 approval_notes as approvalNotes, payment_reference as paymentReference,
-                 payment_method as paymentMethod, notes, created_at as createdAt
-          FROM invoices ORDER BY created_at DESC
-        `).all(),
-        db.prepare(`
-          SELECT id, payment_reference as paymentReference, invoice_number as invoiceNumber,
-                 client_name as clientName, amount, branch_id as branchId, payment_method as paymentMethod,
-                 payment_date as paymentDate, status, bank_transaction_ref as bankTransactionRef,
-                 receipt_number as receiptNumber, verified_by_id as verifiedById,
-                 verified_by_name as verifiedByName, verification_date as verificationDate,
-                 verification_notes as verificationNotes, proof_document_url as proofDocumentUrl,
-                 submitted_at as submittedAt
-          FROM payments ORDER BY submitted_at DESC
-        `).all(),
-        db.prepare(`
-          SELECT id, branch_id as branchId, account_type as accountType, category, amount,
-                 description, date, recorded_by_id as recordedById, recorded_by_name as recordedByName,
-                 matter_id as matterId, property_id as propertyId, receipt_ref as receiptRef
-          FROM expenses ORDER BY date DESC
-        `).all(),
-        db.prepare(`
-          SELECT id, student_id as studentId, full_name as fullName, gender, phone, email,
-                 institution_id as institutionId, institution_name as institutionName, faculty,
-                 programme, level, matric_number as matricNumber, placement_type as placementType,
-                 placement_start_date as placementStartDate, placement_end_date as placementEndDate,
-                 assigned_branch_id as assignedBranchId, supervising_counsel_id as supervisingCounselId,
-                 emergency_contact_name as emergencyContactName, emergency_contact_phone as emergencyContactPhone,
-                 status, completion_letter_issued as completionLetterIssued, certificate_number as certificateNumber,
-                 created_at as createdAt
-          FROM students ORDER BY created_at DESC
-        `).all(),
-        db.prepare(`
-          SELECT id, topic, legal_issue as legalIssue, branch_id as branchId, statutes,
-                 case_authorities as caseAuthorities, legal_notes as legalNotes, matter_id as matterId,
-                 case_id as caseId, counsel_id as counselId, counsel_name as counselName, date
-          FROM legal_research ORDER BY date DESC
-        `).all(),
-        db.prepare(`
-          SELECT id, document_id as documentId, title, branch_id as branchId, category,
-                 entity_type as entityType, entity_id as entityId, file_url as fileUrl,
-                 file_size as fileSize, file_type as fileType, uploaded_by_id as uploadedById,
-                 uploaded_by_name as uploadedByName, version, upload_date as uploadDate,
-                 is_client_visible as isClientVisible, notes, google_drive_link as googleDriveLink
-          FROM documents ORDER BY upload_date DESC
-        `).all(),
-        db.prepare(`
-          SELECT id, title, category, content, publish_date as publishDate, expiry_date as expiryDate,
-                 status, published_by_id as publishedById, published_by_name as publishedByName
-          FROM public_notices ORDER BY publish_date DESC
-        `).all(),
-        db.prepare('SELECT id, full_name as fullName, email, phone, subject, message, branch_id as branchId, status, created_at as createdAt FROM public_enquiries ORDER BY created_at DESC').all(),
-        db.prepare(`
-          SELECT id, request_type as requestType, requester_id as requesterId, requester_name as requesterName,
-                 requester_role as requesterRole, branch_id as branchId, title, description,
-                 reference_code as referenceCode, status, submitted_at as submittedAt,
-                 decided_at as decidedAt, decided_by_id as decidedById, decided_by_name as decidedByName,
-                 decision_notes as decisionNotes
-          FROM approval_requests ORDER BY submitted_at DESC
-        `).all(),
-        db.prepare(`
-          SELECT id, timestamp, user_id as userId, user_name as userName, user_role as userRole,
-                 action, entity, entity_id as entityId, details
-          FROM audit_logs ORDER BY timestamp DESC LIMIT 200
-        `).all(),
-        db.prepare(`
-          SELECT id, tagline, hero_headline as heroHeadline, hero_subheadline as heroSubheadline,
-                 about_story as aboutStory, about_founding_year as aboutFoundingYear,
-                 office_hours_text as officeHoursText, emergency_hotline as emergencyHotline,
-                 consultation_fee_standard as consultationFeeStandard,
-                 internship_policy_notice as internshipPolicyNotice,
-                 recovery_of_premises_notice as recoveryOfPremisesNotice,
-                 invoice_bank_name as invoiceBankName, invoice_account_name as invoiceAccountName,
-                 invoice_account_number as invoiceAccountNumber, invoice_payment_method as invoicePaymentMethod,
-                 last_updated as lastUpdated, updated_by as updatedBy
-          FROM website_content WHERE id = 'cms-main'
-        `).first(),
-        db.prepare('SELECT id, property_id as propertyId, unit_number as unitNumber, description, annual_rent as annualRent, status, current_tenant_id as currentTenantId FROM units').all().catch(() => ({ results: [] })),
-        db.prepare('SELECT id, tenancy_id as tenancyId, tenant_name as tenantName, property_id as propertyId, unit_number as unitNumber, amount_due as amountDue, amount_paid as amountPaid, due_date as dueDate, payment_date as paymentDate, status, payment_reference as paymentReference, receipt_number as receiptNumber FROM rent_records').all().catch(() => ({ results: [] })),
-        db.prepare('SELECT id, reference_number as referenceNumber, branch_id as branchId, type, date, sender, recipient, subject, content, matter_id as matterId, case_id as caseId, client_id as clientId, property_id as propertyId, logged_by_id as loggedById FROM correspondence').all().catch(() => ({ results: [] })),
-        db.prepare('SELECT id, title, client_name as clientName, phone, email, counsel_id as counselId, appointment_type as appointmentType, date, time, branch_id as branchId, location, status, notes FROM appointments').all().catch(() => ({ results: [] })),
-        db.prepare('SELECT id, student_id as studentId, student_name as studentName, date, arrival_time as arrivalTime, departure_time as departureTime, status, supervisor_notes as supervisorNotes, logged_by_id as loggedById FROM internship_attendance').all().catch(() => ({ results: [] })),
-        db.prepare('SELECT id, student_id as studentId, student_name as studentName, evaluation_date as evaluationDate, punctuality_rating as punctualityRating, research_rating as researchRating, drafting_rating as draftingRating, court_conduct_rating as courtConductRating, overall_grade as overallGrade, remarks, evaluated_by_id as evaluatedById FROM internship_evaluations').all().catch(() => ({ results: [] })),
-        db.prepare('SELECT id, property_id as propertyId, tenant_id as tenantId, complaint_title as complaintTitle, workflow_stage as workflowStage, notice_served_date as noticeServedDate, notice_expiry_date as noticeExpiryDate, counsel_in_charge_id as counselInChargeId, suit_number as suitNumber, status_summary as statusSummary, counsel_notes as counselNotes, created_at as createdAt FROM property_disputes').all().catch(() => ({ results: [] })),
-        db.prepare('SELECT id, receipt_number as receiptNumber, payment_reference as paymentReference, invoice_number as invoiceNumber, client_name as clientName, amount, payment_method as paymentMethod, issued_date as issuedDate, issued_by_id as issuedById, issued_by_name as issuedByName FROM receipts').all().catch(() => ({ results: [] }))
-      ]);
-
-      // Parse JSON fields
-      const users = (usersRes.results || []).map((u: any) => ({
-        ...u,
-        practiceAreas: typeof u.practiceAreas === 'string' ? JSON.parse(u.practiceAreas || '[]') : u.practiceAreas,
-        isPubliclyVisible: Boolean(u.isPubliclyVisible),
-        isActive: Boolean(u.isActive),
-        requiresPasswordChange: Boolean(u.requiresPasswordChange)
-      }));
-
-      const consultations = (consultationsRes.results || []).map((c: any) => ({
-        ...c,
-        supportingDocuments: typeof c.supportingDocuments === 'string' ? JSON.parse(c.supportingDocuments || '[]') : c.supportingDocuments
-      }));
-
-      const invoices = (invoicesRes.results || []).map((inv: any) => ({
-        ...inv,
-        items: typeof inv.items === 'string' ? JSON.parse(inv.items || '[]') : inv.items
-      }));
-
-      const students = (studentsRes.results || []).map((s: any) => ({
-        ...s,
-        completionLetterIssued: Boolean(s.completionLetterIssued)
-      }));
-
-      return jsonResponse({
-        success: true,
-        data: {
-          branches: branchesRes.results || [],
-          users,
-          courts: courtsRes.results || [],
-          institutions: institutionsRes.results || [],
-          clients: clientsRes.results || [],
-          consultations,
-          matters: mattersRes.results || [],
-          cases: casesRes.results || [],
-          caseAssignments: assignmentsRes.results || [],
-          courtDiary: diaryRes.results || [],
-          tasks: tasksRes.results || [],
-          properties: propertiesRes.results || [],
-          landlords: landlordsRes.results || [],
-          tenants: tenantsRes.results || [],
-          tenancies: tenanciesRes.results || [],
-          quitNotices: quitNoticesRes.results || [],
-          invoices,
-          payments: paymentsRes.results || [],
-          expenses: expensesRes.results || [],
-          students,
-          legalResearch: researchRes.results || [],
-          documents: documentsRes.results || [],
-          publicNotices: noticesRes.results || [],
-          publicEnquiries: enquiriesRes.results || [],
-          approvals: approvalsRes.results || [],
-          auditLogs: auditLogsRes.results || [],
-          websiteContent: websiteContentRes || INITIAL_CMS_SEED,
-          units: unitsRes.results || [],
-          rentRecords: rentRecordsRes.results || [],
-          correspondence: correspondenceRes.results || [],
-          appointments: appointmentsRes.results || [],
-          attendance: attendanceRes.results || [],
-          evaluations: evaluationsRes.results || [],
-          propertyDisputes: disputesRes.results || [],
-          receipts: receiptsRes.results || []
-        },
-        timestamp: new Date().toISOString()
-      });
-    }
-
-    // =========================================================================
-    // 3. AUTHENTICATION & SESSIONS
-    // =========================================================================
-
-    // POST /api/auth/login
-    if (path === '/api/auth/login' && method === 'POST') {
-      const body = await request.json().catch(() => ({}));
-      const identifier = (body.username || body.identifier || '').trim().toLowerCase();
+    // --------------------------------------------------------------------------
+    // 2. AUTHENTICATION
+    // --------------------------------------------------------------------------
+    if (path === '/api/auth/login' && request.method === 'POST') {
+      const body = await request.json() as any;
+      const identifier = (body.identifier || '').trim().toLowerCase();
       const password = body.password || '';
 
       if (!identifier || !password) {
-        return errorResponse('Username/Email and password are required', 400);
+        return errorResponse('Username/email and password are required.');
       }
 
-      await seedD1InitialData(db);
+      // Find user
+      let userRow = await db.prepare(
+        'SELECT * FROM users WHERE LOWER(username) = ? OR LOWER(email) = ?'
+      ).bind(identifier, identifier).first<any>();
 
-      // Match user by username or email
-      let userRow = await db.prepare(`
-        SELECT * FROM users WHERE LOWER(username) = ? OR LOWER(email) = ?
-      `).bind(identifier, identifier).first();
-
-      // Support common role aliases
+      // Check role aliases if not found
       if (!userRow) {
-        const aliasMap: Record<string, string> = {
-          'principal': 'usr-principal-01',
-          'principal.partner': 'usr-principal-01',
-          'head': 'usr-hoc-01',
-          'head.chamber': 'usr-hoc-01',
-          'admin': 'usr-admin-01',
-          'administrator': 'usr-admin-01',
-          'secretary': 'usr-admin-01',
-          'accounts': 'usr-account-01',
-          'account': 'usr-account-01',
-          'counsel': 'usr-counsel-01'
-        };
-        const aliasedId = aliasMap[identifier];
-        if (aliasedId) {
-          userRow = await db.prepare('SELECT * FROM users WHERE id = ?').bind(aliasedId).first();
+        let roleMatch = '';
+        if (['principal.partner', 'principal_partner', 'principal', 'admin'].includes(identifier)) roleMatch = 'PRINCIPAL_PARTNER';
+        if (['head.chamber', 'head_of_chamber', 'head'].includes(identifier)) roleMatch = 'HEAD_OF_CHAMBER';
+        if (['administrator', 'administrator_secretary', 'secretary'].includes(identifier)) roleMatch = 'ADMINISTRATOR_SECRETARY';
+        if (['accounts', 'account_officer', 'account'].includes(identifier)) roleMatch = 'ACCOUNT_OFFICER';
+        if (['counsel', 'counsel_staff'].includes(identifier)) roleMatch = 'COUNSEL_STAFF';
+
+        if (roleMatch) {
+          userRow = await db.prepare('SELECT * FROM users WHERE role = ? LIMIT 1').bind(roleMatch).first<any>();
         }
       }
 
       if (!userRow) {
-        return errorResponse('Invalid username or password', 401);
+        await logAudit(db, 'system', identifier, 'PUBLIC', 'LOGIN_FAILED', 'User', identifier, 'User not found');
+        return errorResponse('Invalid username/email or password.', 401);
       }
 
-      if (userRow.account_status !== 'Active' || !userRow.is_active) {
-        return errorResponse(`Account is ${userRow.account_status}. Please contact Chambers Administrator.`, 403);
+      if (userRow.account_status === 'Suspended') {
+        return errorResponse('Account suspended. Please consult the Principal Partner.', 403);
+      }
+      if (!userRow.is_active || userRow.account_status === 'Inactive') {
+        return errorResponse('Account is deactivated. Please consult Chambers Administration.', 403);
       }
 
-      // Verify cryptographic password hash
-      const isValid = await verifyPassword(password, userRow.salt, userRow.password_hash);
-      if (!isValid) {
-        const failedAttempts = (userRow.failed_login_attempts || 0) + 1;
-        await db.prepare('UPDATE users SET failed_login_attempts = ? WHERE id = ?').bind(failedAttempts, userRow.id).run();
-        return errorResponse('Invalid username or password', 401);
+      // Verify password
+      let isPasswordValid = await verifyPassword(password, userRow.salt, userRow.password_hash);
+      
+      // Initial bootstrap fallback: if user requires password change and uses default admin@2026
+      if (!isPasswordValid && userRow.requires_password_change && password === 'admin@2026') {
+        isPasswordValid = true;
+        const newHash = await hashPassword('admin@2026', userRow.salt);
+        await db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').bind(newHash, userRow.id).run();
       }
 
-      // Reset failed attempts & record last login
-      await db.prepare(`
-        UPDATE users SET failed_login_attempts = 0, last_login = datetime('now') WHERE id = ?
-      `).bind(userRow.id).run();
+      if (!isPasswordValid) {
+        await db.prepare(
+          'UPDATE users SET failed_login_attempts = failed_login_attempts + 1 WHERE id = ?'
+        ).bind(userRow.id).run();
+        await logAudit(db, userRow.id, userRow.name, userRow.role, 'LOGIN_FAILED', 'User', userRow.id, 'Incorrect password');
+        return errorResponse('Invalid username/email or password.', 401);
+      }
 
-      const token = `d1-sess-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-      const safeUser = {
+      // Reset failed attempts & set last_login
+      await db.prepare(
+        "UPDATE users SET failed_login_attempts = 0, last_login = datetime('now') WHERE id = ?"
+      ).bind(userRow.id).run();
+
+      // Create session in user_sessions
+      const token = generateSecureToken(32);
+      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+
+      await db.prepare(
+        `INSERT INTO user_sessions (token, user_id, role, branch_id, expires_at, created_at, last_active_at)
+         VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
+      ).bind(token, userRow.id, userRow.role, userRow.branch_id, expiresAt).run();
+
+      await logAudit(db, userRow.id, userRow.name, userRow.role, 'LOGIN_SUCCESS', 'Session', token, 'User logged in successfully');
+
+      const user: User = {
         id: userRow.id,
         username: userRow.username,
         name: userRow.name,
         email: userRow.email,
         phone: userRow.phone,
-        role: userRow.role,
+        role: userRow.role as UserRole,
         branchId: userRow.branch_id,
         title: userRow.title,
-        practiceAreas: typeof userRow.practice_areas === 'string' ? JSON.parse(userRow.practice_areas || '[]') : userRow.practice_areas,
-        bio: userRow.bio,
-        photoUrl: userRow.photo_url,
-        availability: userRow.availability,
+        practiceAreas: typeof userRow.practice_areas === 'string' ? JSON.parse(userRow.practice_areas || '[]') : [],
+        bio: userRow.bio || '',
+        photoUrl: userRow.photo_url || '',
+        availability: userRow.availability || 'AVAILABLE',
         isPubliclyVisible: Boolean(userRow.is_publicly_visible),
         isActive: Boolean(userRow.is_active),
         accountStatus: userRow.account_status,
+        passwordHash: '',
+        salt: '',
         requiresPasswordChange: Boolean(userRow.requires_password_change),
-        lastLogin: new Date().toISOString()
+        failedLoginAttempts: 0,
+        createdAt: userRow.created_at
       };
 
-      await logD1Audit(db, safeUser, 'LOGIN', 'User', userRow.id, `User logged in from ${userRow.branch_id}`);
+      const session: UserSession = {
+        userId: userRow.id,
+        token,
+        role: userRow.role as UserRole,
+        branchId: userRow.branch_id,
+        rememberMe: true,
+        expiresAt,
+        lastActiveAt: new Date().toISOString()
+      };
 
       return jsonResponse({
         success: true,
-        user: safeUser,
-        session: {
-          userId: userRow.id,
-          token,
-          role: userRow.role,
-          branchId: userRow.branch_id,
-          rememberMe: body.rememberMe ?? true,
-          expiresAt: new Date(Date.now() + 86400000).toISOString()
-        },
-        requiresPasswordChange: Boolean(userRow.requires_password_change)
+        user,
+        session,
+        requiresPasswordChange: user.requiresPasswordChange
       });
     }
 
-    // POST /api/auth/change-password
-    if (path === '/api/auth/change-password' && method === 'POST') {
-      const body = await request.json().catch(() => ({}));
-      const { userId, currentPassword, newPassword } = body;
+    if (path === '/api/auth/me' && request.method === 'GET') {
+      const auth = await getAuthUser(request, db);
+      if (!auth) {
+        return errorResponse('Unauthorized or session expired', 401);
+      }
+      return jsonResponse({ success: true, user: auth.user, session: auth.session });
+    }
 
-      const userRow = await db.prepare('SELECT * FROM users WHERE id = ?').bind(userId).first();
-      if (!userRow) return errorResponse('User not found', 404);
+    if (path === '/api/auth/logout' && request.method === 'POST') {
+      const auth = await getAuthUser(request, db);
+      if (auth) {
+        await db.prepare('DELETE FROM user_sessions WHERE token = ?').bind(auth.session.token).run();
+        await logAudit(db, auth.user.id, auth.user.name, auth.user.role, 'LOGOUT', 'Session', auth.session.token, 'User logged out');
+      }
+      return jsonResponse({ success: true });
+    }
 
-      // Verify current password unless initial password change required
-      if (!userRow.requires_password_change) {
-        const matches = await verifyPassword(currentPassword, userRow.salt, userRow.password_hash);
-        if (!matches) return errorResponse('Current password does not match', 400);
+    if (path === '/api/auth/change-password' && request.method === 'POST') {
+      const auth = await getAuthUser(request, db);
+      if (!auth) return errorResponse('Unauthorized', 401);
+
+      const body = await request.json() as any;
+      const { currentPassword, newPassword } = body;
+
+      const userRow = await db.prepare('SELECT salt, password_hash FROM users WHERE id = ?').bind(auth.user.id).first<any>();
+      if (!userRow) return errorResponse('User record not found', 404);
+
+      const isCurrentValid = await verifyPassword(currentPassword, userRow.salt, userRow.password_hash);
+      if (!isCurrentValid) {
+        return errorResponse('Current password does not match our records.', 400);
       }
 
-      const newSalt = generateSalt(16);
+      const strength = validatePasswordStrength(newPassword);
+      if (!strength.isValid) {
+        return errorResponse(strength.errors[0], 400);
+      }
+
+      const newSalt = generateSalt();
       const newHash = await hashPassword(newPassword, newSalt);
 
-      await db.prepare(`
-        UPDATE users
-        SET password_hash = ?, salt = ?, requires_password_change = 0,
-            password_changed_at = datetime('now'), failed_login_attempts = 0
-        WHERE id = ?
-      `).bind(newHash, newSalt, userId).run();
+      await db.prepare(
+        `UPDATE users 
+         SET salt = ?, password_hash = ?, requires_password_change = 0, 
+             account_status = 'Active', password_changed_at = datetime('now')
+         WHERE id = ?`
+      ).bind(newSalt, newHash, auth.user.id).run();
 
-      await logD1Audit(db, { id: userRow.id, name: userRow.name, role: userRow.role }, 'CHANGE_PASSWORD', 'User', userId, 'Password successfully updated');
-
-      return jsonResponse({ success: true, message: 'Password successfully changed' });
+      await logAudit(db, auth.user.id, auth.user.name, auth.user.role, 'CHANGE_PASSWORD', 'User', auth.user.id, 'User changed password');
+      return jsonResponse({ success: true, message: 'Password updated successfully' });
     }
 
-    // =========================================================================
-    // 4. CLIENTS REGISTRY
-    // =========================================================================
-
-    if (path === '/api/clients' && method === 'GET') {
-      const rows = await db.prepare(`
-        SELECT id, client_id as clientId, full_name as fullName, organization, client_type as clientType,
-               phone, email, address, state, lga, identification_type as identificationType,
-               identification_number as identificationNumber, branch_id as branchId,
-               assigned_lawyer_id as assignedLawyerId, conflict_check_status as conflictCheckStatus,
-               conflict_check_notes as conflictCheckNotes, conflict_reviewed_by as conflictReviewedBy,
-               date_registered as dateRegistered, is_active as isActive, confidential_notes as confidentialNotes
-        FROM clients ORDER BY created_at DESC
-      `).all();
-      return jsonResponse({ success: true, clients: rows.results || [] });
-    }
-
-    if (path === '/api/clients' && method === 'POST') {
-      const data = await request.json().catch(() => ({}));
-      const actor = {
-        id: request.headers.get('X-User-Id') || 'usr-admin-01',
-        name: 'Authorized Staff',
-        role: request.headers.get('X-User-Role') || 'ADMINISTRATOR_SECRETARY'
-      };
-
-      const clientIdCode = await getNextD1Number(db, 'client', 'CLI');
-      const id = `cli-${Date.now()}`;
-
-      await db.prepare(`
-        INSERT INTO clients (
-          id, client_id, full_name, organization, client_type, phone, email,
-          address, state, lga, identification_type, identification_number,
-          branch_id, assigned_lawyer_id, conflict_check_status, conflict_check_notes,
-          conflict_reviewed_by, date_registered, is_active, confidential_notes, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-      `).bind(
-        id, clientIdCode, data.fullName, data.organization || null, data.clientType || 'Individual',
-        data.phone, data.email, data.address, data.state || 'FCT', data.lga || 'AMAC',
-        data.identificationType || null, data.identificationNumber || null,
-        data.branchId || 'br-abuja-01', data.assignedLawyerId || 'usr-counsel-01',
-        data.conflictCheckStatus || 'Pending', data.conflictCheckNotes || null,
-        data.conflictReviewedBy || null, new Date().toISOString().split('T')[0],
-        data.isActive !== false ? 1 : 0, data.confidentialNotes || null
-      ).run();
-
-      await logD1Audit(db, actor, 'CREATE_CLIENT', 'Client', id, `Registered client ${data.fullName} (${clientIdCode})`);
-
-      const created = {
-        ...data,
-        id,
-        clientId: clientIdCode,
-        dateRegistered: new Date().toISOString().split('T')[0],
-        isActive: true
-      };
-
-      return jsonResponse({ success: true, client: created, message: 'Saved successfully' });
-    }
-
-    if (path.startsWith('/api/clients/') && method === 'PUT') {
-      const clientId = path.replace('/api/clients/', '');
-      const data = await request.json().catch(() => ({}));
-      const actor = {
-        id: request.headers.get('X-User-Id') || 'usr-admin-01',
-        name: 'Authorized Staff',
-        role: request.headers.get('X-User-Role') || 'ADMINISTRATOR_SECRETARY'
-      };
-
-      await db.prepare(`
-        UPDATE clients
-        SET full_name = ?, organization = ?, client_type = ?, phone = ?, email = ?,
-            address = ?, state = ?, lga = ?, identification_type = ?, identification_number = ?,
-            branch_id = ?, assigned_lawyer_id = ?, conflict_check_status = ?,
-            conflict_check_notes = ?, conflict_reviewed_by = ?, is_active = ?,
-            confidential_notes = ?
-        WHERE id = ?
-      `).bind(
-        data.fullName, data.organization || null, data.clientType, data.phone, data.email,
-        data.address, data.state, data.lga, data.identificationType || null, data.identificationNumber || null,
-        data.branchId, data.assignedLawyerId, data.conflictCheckStatus,
-        data.conflictCheckNotes || null, data.conflictReviewedBy || null,
-        data.isActive ? 1 : 0, data.confidentialNotes || null,
-        clientId
-      ).run();
-
-      await logD1Audit(db, actor, 'UPDATE_CLIENT', 'Client', clientId, `Updated client ${data.fullName}`);
-      return jsonResponse({ success: true, client: data, message: 'Saved successfully' });
-    }
-
-    // =========================================================================
-    // 5. INVOICES & PAYMENTS WORKFLOW
-    // =========================================================================
-
-    if (path === '/api/invoices' && method === 'GET') {
-      const rows = await db.prepare(`
-        SELECT id, invoice_number as invoiceNumber, client_id as clientId, client_name as clientName,
-               client_email as clientEmail, client_phone as clientPhone, matter_id as matterId,
-               branch_id as branchId, consultation_id as consultationId, consultation_code as consultationCode,
-               items, subtotal, tax_amount as taxAmount, total_amount as totalAmount,
-               date, due_date as dueDate, payment_status as paymentStatus,
-               approval_status as approvalStatus, approval_request_id as approvalRequestId,
-               approval_notes as approvalNotes, payment_reference as paymentReference,
-               payment_method as paymentMethod, notes, created_at as createdAt
-        FROM invoices ORDER BY created_at DESC
-      `).all();
-
-      const invoices = (rows.results || []).map((inv: any) => ({
-        ...inv,
-        items: typeof inv.items === 'string' ? JSON.parse(inv.items || '[]') : inv.items
-      }));
-
-      return jsonResponse({ success: true, invoices });
-    }
-
-    if (path === '/api/invoices' && method === 'POST') {
-      const data = await request.json().catch(() => ({}));
-      const actor = {
-        id: request.headers.get('X-User-Id') || 'usr-account-01',
-        name: 'Chukwuemeka Okonkwo',
-        role: request.headers.get('X-User-Role') || 'ACCOUNT_OFFICER'
-      };
-
-      const invoiceNumber = data.invoiceNumber || await getNextD1Number(db, 'invoice', 'INV');
-      const paymentRef = data.paymentReference || await getNextD1Number(db, 'payment', 'PAY');
-      const id = data.id || `inv-${Date.now()}`;
-
-      await db.prepare(`
-        INSERT INTO invoices (
-          id, invoice_number, client_id, client_name, client_email, client_phone,
-          matter_id, branch_id, consultation_id, consultation_code, items, subtotal,
-          tax_amount, total_amount, date, due_date, payment_status, approval_status,
-          approval_request_id, approval_notes, payment_reference, payment_method, notes, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-      `).bind(
-        id, invoiceNumber, data.clientId || null, data.clientName, data.clientEmail || '', data.clientPhone || '',
-        data.matterId || null, data.branchId || 'br-abuja-01', data.consultationId || null, data.consultationCode || null,
-        JSON.stringify(data.items || []), data.subtotal || data.totalAmount, data.taxAmount || 0, data.totalAmount,
-        data.date || new Date().toISOString().split('T')[0], data.dueDate || new Date().toISOString().split('T')[0],
-        data.paymentStatus || 'UNPAID', data.approvalStatus || 'NONE', data.approvalRequestId || null,
-        data.approvalNotes || null, paymentRef, data.paymentMethod || null, data.notes || null
-      ).run();
-
-      await logD1Audit(db, actor, 'CREATE_INVOICE', 'Invoice', id, `Created invoice ${invoiceNumber} for ${data.clientName} (₦${Number(data.totalAmount).toLocaleString()})`);
-
-      const created = {
-        ...data,
-        id,
-        invoiceNumber,
-        paymentReference: paymentRef,
-        items: data.items || []
-      };
-
-      return jsonResponse({ success: true, invoice: created, message: 'Saved successfully' });
-    }
-
-    // POST /api/payments/submit — Public / Client payment receipt submission
-    if (path === '/api/payments/submit' && method === 'POST') {
-      const data = await request.json().catch(() => ({}));
-      const id = `pay-${Date.now()}`;
-
-      await db.prepare(`
-        INSERT INTO payments (
-          id, payment_reference, invoice_number, client_name, amount, branch_id,
-          payment_method, payment_date, status, bank_transaction_ref, verification_notes,
-          proof_document_url, submitted_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PAYMENT_SUBMITTED', ?, ?, ?, datetime('now'))
-      `).bind(
-        id, data.paymentReference, data.invoiceNumber, data.clientName, data.amount,
-        data.branchId || 'br-abuja-01', data.paymentMethod || 'Bank Transfer',
-        new Date().toISOString().split('T')[0], data.bankTransactionRef || null,
-        data.notes || null, data.proofDocumentUrl || null
-      ).run();
-
-      // Update invoice to PAYMENT_SUBMITTED
-      await db.prepare(`
-        UPDATE invoices SET payment_status = 'PAYMENT_SUBMITTED', payment_method = ?
-        WHERE invoice_number = ? OR payment_reference = ?
-      `).bind(data.paymentMethod || 'Bank Transfer', data.invoiceNumber, data.paymentReference).run();
-
-      // Update linked consultation
-      await db.prepare(`
-        UPDATE consultations
-        SET status = 'Payment Verification Pending',
-            client_visible_update = 'Payment receipt submitted. Pending verification by Account Officer.'
-        WHERE payment_reference = ? OR invoice_number = ?
-      `).bind(data.paymentReference, data.invoiceNumber).run();
-
-      return jsonResponse({ success: true, paymentId: id, message: 'Payment submitted for Chambers verification' });
-    }
-
-    // POST /api/payments/verify — Account Officer / Head of Chamber / Principal Partner verification
-    if (path === '/api/payments/verify' && method === 'POST') {
-      const data = await request.json().catch(() => ({}));
-      const { paymentId, isApproved, notes } = data;
-      const actor = {
-        id: request.headers.get('X-User-Id') || 'usr-account-01',
-        name: 'Chukwuemeka Okonkwo, ACA',
-        role: request.headers.get('X-User-Role') || 'ACCOUNT_OFFICER'
-      };
-
-      // Server-side authorization: only the Account Officer, Head of Chamber or
-      // Principal Partner may verify payments and settle invoices.
-      const PAYMENT_VERIFIER_ROLES = ['ACCOUNT_OFFICER', 'ADMINISTRATOR_SECRETARY', 'HEAD_OF_CHAMBER', 'PRINCIPAL_PARTNER'];
-      if (!PAYMENT_VERIFIER_ROLES.includes(actor.role)) {
-        return errorResponse(`Unauthorized: role "${actor.role}" cannot verify payments.`, 403);
-      }
-
-      const payment = await db.prepare('SELECT * FROM payments WHERE id = ?').bind(paymentId).first();
-      if (!payment) return errorResponse('Payment record not found', 404);
-
-      let receiptNumber = payment.receipt_number;
-      if (isApproved && !receiptNumber) {
-        receiptNumber = await getNextD1Number(db, 'receipt', 'REC');
-      }
-
-      const status = isApproved ? 'PAYMENT_VERIFIED' : 'REJECTED';
-
-      // 1. Update Payment Record
-      await db.prepare(`
-        UPDATE payments
-        SET status = ?, receipt_number = ?, verified_by_id = ?, verified_by_name = ?,
-            verification_date = datetime('now'), verification_notes = ?
-        WHERE id = ?
-      `).bind(status, receiptNumber, actor.id, actor.name, notes || 'Verified by Account Officer', paymentId).run();
-
-      // 2. Update Invoice Status — becomes PAID / PAYMENT_VERIFIED
-      const invoiceStatus = isApproved ? 'PAYMENT_VERIFIED' : 'UNPAID';
-      await db.prepare(`
-        UPDATE invoices SET payment_status = ? WHERE invoice_number = ?
-      `).bind(invoiceStatus, payment.invoice_number).run();
-
-      // 3. Insert or update Receipt in receipts table
-      if (isApproved && receiptNumber) {
-        try {
-          await db.prepare(`
-            INSERT OR REPLACE INTO receipts (
-              id, receipt_number, payment_reference, invoice_number, client_name,
-              amount, payment_method, issued_date, issued_by_id, issued_by_name, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, date('now'), ?, ?, datetime('now'))
-          `).bind(
-            `rec-${Date.now()}`, receiptNumber, payment.payment_reference, payment.invoice_number,
-            payment.client_name, payment.amount, payment.payment_method, actor.id, actor.name
-          ).run();
-        } catch (recErr) {
-          console.warn('Failed recording receipt in receipts table:', recErr);
-        }
-      }
-
-      // 4. Update Linked Consultation
-      if (isApproved) {
-        await db.prepare(`
-          UPDATE consultations
-          SET status = 'Payment Verified',
-              client_visible_update = ?
-          WHERE invoice_number = ? OR payment_reference = ?
-        `).bind(
-          `Payment verified by Accounts. Receipt ${receiptNumber} generated. Consultation schedule confirmed.`,
-          payment.invoice_number, payment.payment_reference
-        ).run();
-      }
-
-      await logD1Audit(
-        db, actor, isApproved ? 'VERIFY_PAYMENT' : 'REJECT_PAYMENT',
-        'Payment', paymentId,
-        `${isApproved ? 'Verified' : 'Rejected'} payment of ₦${Number(payment.amount).toLocaleString()} for ${payment.client_name}. Receipt: ${receiptNumber || 'None'}`
-      );
+    // --------------------------------------------------------------------------
+    // 3. MULTI-DEVICE FULL SYNC
+    // --------------------------------------------------------------------------
+    if (path === '/api/sync' && request.method === 'GET') {
+      const branches = await db.prepare('SELECT * FROM branches WHERE is_active = 1').all<any>();
+      const users = await db.prepare('SELECT id, username, name, email, phone, role, branch_id, title, practice_areas, bio, photo_url, availability, is_publicly_visible, is_active, account_status, requires_password_change, created_at FROM users').all<any>();
+      const courts = await db.prepare('SELECT * FROM courts').all<any>().catch(() => ({ results: [] }));
+      const institutions = await db.prepare('SELECT * FROM partner_institutions').all<any>().catch(() => ({ results: [] }));
+      const clients = await db.prepare('SELECT * FROM clients ORDER BY date_registered DESC').all<any>();
+      const consultations = await db.prepare('SELECT * FROM consultations ORDER BY created_at DESC').all<any>();
+      const matters = await db.prepare('SELECT * FROM matters ORDER BY created_at DESC').all<any>();
+      const cases = await db.prepare('SELECT * FROM cases ORDER BY created_at DESC').all<any>();
+      const caseAssignments = await db.prepare('SELECT * FROM case_assignments ORDER BY date_assigned DESC').all<any>();
+      const courtDiary = await db.prepare('SELECT * FROM court_diary ORDER BY court_date ASC').all<any>();
+      const tasks = await db.prepare('SELECT * FROM tasks ORDER BY due_date ASC').all<any>();
+      const properties = await db.prepare('SELECT * FROM properties ORDER BY created_at DESC').all<any>();
+      const landlords = await db.prepare('SELECT * FROM landlords ORDER BY date_registered DESC').all<any>();
+      const units = await db.prepare('SELECT * FROM units').all<any>().catch(() => ({ results: [] }));
+      const tenants = await db.prepare('SELECT * FROM tenants ORDER BY date_registered DESC').all<any>();
+      const tenancies = await db.prepare('SELECT * FROM tenancies').all<any>().catch(() => ({ results: [] }));
+      const rentRecords = await db.prepare('SELECT * FROM rent_records').all<any>().catch(() => ({ results: [] }));
+      const quitNotices = await db.prepare('SELECT * FROM quit_notices ORDER BY created_at DESC').all<any>();
+      const invoices = await db.prepare('SELECT * FROM invoices ORDER BY created_at DESC').all<any>();
+      const payments = await db.prepare('SELECT * FROM payments ORDER BY submitted_at DESC').all<any>();
+      const expenses = await db.prepare('SELECT * FROM expenses ORDER BY created_at DESC').all<any>().catch(() => ({ results: [] }));
+      const students = await db.prepare('SELECT * FROM students ORDER BY created_at DESC').all<any>();
+      const documents = await db.prepare('SELECT * FROM documents ORDER BY upload_date DESC').all<any>();
+      const correspondence = await db.prepare('SELECT * FROM correspondence ORDER BY created_at DESC').all<any>().catch(() => ({ results: [] }));
+      const legalResearch = await db.prepare('SELECT * FROM legal_research ORDER BY date DESC').all<any>();
+      const appointments = await db.prepare('SELECT * FROM appointments ORDER BY date ASC').all<any>().catch(() => ({ results: [] }));
+      const publicNotices = await db.prepare('SELECT * FROM public_notices ORDER BY publish_date DESC').all<any>();
+      const publicEnquiries = await db.prepare('SELECT * FROM public_enquiries ORDER BY created_at DESC').all<any>().catch(() => ({ results: [] }));
+      const websiteContent = await db.prepare("SELECT * FROM website_content WHERE id = 'cms-main'").first<any>();
+      const auditLogs = await db.prepare('SELECT * FROM audit_logs ORDER BY timestamp DESC LIMIT 100').all<any>();
 
       return jsonResponse({
         success: true,
-        receiptNumber,
-        status,
-        message: isApproved ? 'Payment verified and invoice marked PAID' : 'Payment rejected'
+        timestamp: new Date().toISOString(),
+        data: {
+          branches: branches.results || [],
+          users: (users.results || []).map(u => ({
+            ...u,
+            branchId: u.branch_id,
+            practiceAreas: typeof u.practice_areas === 'string' ? JSON.parse(u.practice_areas || '[]') : [],
+            isPubliclyVisible: Boolean(u.is_publicly_visible),
+            isActive: Boolean(u.is_active),
+            requiresPasswordChange: Boolean(u.requires_password_change)
+          })),
+          courts: courts.results || [],
+          institutions: institutions.results || [],
+          clients: (clients.results || []).map(c => ({
+            ...c,
+            clientId: c.client_id,
+            fullName: c.full_name,
+            clientType: c.client_type,
+            branchId: c.branch_id,
+            assignedLawyerId: c.assigned_lawyer_id,
+            conflictCheckStatus: c.conflict_check_status,
+            conflictCheckNotes: c.conflict_check_notes,
+            dateRegistered: c.date_registered,
+            isActive: Boolean(c.is_active),
+            confidentialNotes: c.confidential_notes
+          })),
+          consultations: (consultations.results || []).map(cons => ({
+            ...cons,
+            serviceCategory: cons.service_category,
+            preferredDate: cons.preferred_date,
+            preferredTime: cons.preferred_time,
+            fullName: cons.full_name,
+            briefEnquiry: cons.brief_enquiry,
+            supportingDocuments: typeof cons.supporting_documents === 'string' ? JSON.parse(cons.supporting_documents || '[]') : [],
+            invoiceNumber: cons.invoice_number,
+            paymentReference: cons.payment_reference,
+            branchId: cons.branch_id,
+            assignedLawyerId: cons.assigned_lawyer_id,
+            clientVisibleUpdate: cons.client_visible_update,
+            createdAt: cons.created_at
+          })),
+          matters: (matters.results || []).map(m => ({
+            ...m,
+            matterId: m.matter_id,
+            clientId: m.client_id,
+            branchId: m.branch_id,
+            leadCounselId: m.lead_counsel_id,
+            engagementDate: m.engagement_date,
+            clientVisibleUpdate: m.client_visible_update,
+            privilegedInternalNotes: m.privileged_internal_notes,
+            requiresPrincipalApproval: Boolean(m.requires_principal_approval),
+            principalApprovalStatus: m.principal_approval_status,
+            createdAt: m.created_at
+          })),
+          cases: (cases.results || []).map(cs => ({
+            ...cs,
+            caseId: cs.case_id,
+            suitNumber: cs.suit_number,
+            matterId: cs.matter_id,
+            clientId: cs.client_id,
+            branchId: cs.branch_id,
+            courtId: cs.court_id,
+            judicialDivision: cs.judicial_division,
+            counselId: cs.counsel_id,
+            opposingParty: cs.opposing_party,
+            opposingCounsel: cs.opposing_counsel,
+            caseType: cs.case_type,
+            subjectMatter: cs.subject_matter,
+            filingDate: cs.filing_date,
+            nextCourtDate: cs.next_court_date,
+            clientVisibleUpdate: cs.client_visible_update,
+            internalStrategyNotes: cs.internal_strategy_notes,
+            createdAt: cs.created_at
+          })),
+          caseAssignments: (caseAssignments.results || []).map(a => ({
+            ...a,
+            caseId: a.case_id,
+            suitNumber: a.suit_number,
+            branchId: a.branch_id,
+            counselId: a.counsel_id,
+            assignedById: a.assigned_by_id,
+            assignedByName: a.assigned_by_name,
+            dateAssigned: a.date_assigned,
+            rejectionReason: a.rejection_reason,
+            rejectionNotes: a.rejection_notes,
+            responseDate: a.response_date
+          })),
+          courtDiary: (courtDiary.results || []).map(cd => ({
+            ...cd,
+            caseId: cd.case_id,
+            suitNumber: cd.suit_number,
+            branchId: cd.branch_id,
+            courtDate: cd.court_date,
+            courtTime: cd.court_time,
+            courtName: cd.court_name,
+            counselId: cd.counsel_id,
+            clientId: cd.client_id,
+            outcomeSummary: cd.outcome_summary,
+            nextCourtDate: cd.next_court_date
+          })),
+          tasks: (tasks.results || []).map(t => ({
+            ...t,
+            assignedToId: t.assigned_to_id,
+            assignedById: t.assigned_by_id,
+            branchId: t.branch_id,
+            matterId: t.matter_id,
+            caseId: t.case_id,
+            dueDate: t.due_date,
+            completionDate: t.completion_date,
+            createdAt: t.created_at
+          })),
+          properties: (properties.results || []).map(p => ({
+            ...p,
+            propertyId: p.property_id,
+            branchId: p.branch_id,
+            propertyType: p.property_type,
+            landlordId: p.landlord_id,
+            totalUnits: p.total_units,
+            titleInformation: p.title_information,
+            surveyInformation: p.survey_information,
+            legalStatus: p.legal_status,
+            assignedLawyerId: p.assigned_lawyer_id,
+            relatedClientId: p.related_client_id,
+            relatedMatterId: p.related_matter_id,
+            createdAt: p.created_at
+          })),
+          landlords: (landlords.results || []).map(l => ({
+            ...l,
+            landlordId: l.landlord_id,
+            fullName: l.full_name,
+            bankDetails: l.bank_details,
+            trackingCode: l.tracking_code,
+            dateRegistered: l.date_registered
+          })),
+          units: (units.results || []).map(u => ({
+            ...u,
+            propertyId: u.property_id,
+            unitNumber: u.unit_number,
+            unitType: u.unit_type,
+            rentalFee: u.rental_fee,
+            currentTenantId: u.current_tenant_id,
+            createdAt: u.created_at
+          })),
+          tenants: (tenants.results || []).map(t => ({
+            ...t,
+            tenantId: t.tenant_id,
+            fullName: t.full_name,
+            landlordId: t.landlord_id,
+            propertyId: t.property_id,
+            unitNumber: t.unit_number,
+            trackingCode: t.tracking_code,
+            dateRegistered: t.date_registered
+          })),
+          tenancies: (tenancies.results || []).map(ten => ({
+            ...ten,
+            tenantId: ten.tenant_id,
+            propertyId: ten.property_id,
+            unitNumber: ten.unit_number,
+            rentAmount: ten.rent_amount,
+            startDate: ten.start_date,
+            expiryDate: ten.expiry_date,
+            paymentFrequency: ten.payment_frequency,
+            arrearsAmount: ten.arrears_amount,
+            tenancyAgreementDocId: ten.tenancy_agreement_doc_id
+          })),
+          rentRecords: rentRecords.results || [],
+          quitNotices: (quitNotices.results || []).map(q => ({
+            ...q,
+            quitNoticeId: q.quit_notice_id,
+            tenantId: q.tenant_id,
+            tenantName: q.tenant_name,
+            propertyId: q.property_id,
+            propertyName: q.property_name,
+            landlordId: q.landlord_id,
+            landlordName: q.landlord_name,
+            unitNumber: q.unit_number,
+            noticeType: q.notice_type,
+            noticeDate: q.notice_date,
+            noticeExpiryDate: q.notice_expiry_date,
+            statutoryBasis: q.statutory_basis,
+            issuedById: q.issued_by_id,
+            issuedByName: q.issued_by_name,
+            createdAt: q.created_at
+          })),
+          invoices: (invoices.results || []).map(inv => ({
+            ...inv,
+            invoiceNumber: inv.invoice_number,
+            clientId: inv.client_id,
+            clientName: inv.client_name,
+            clientEmail: inv.client_email,
+            clientPhone: inv.client_phone,
+            matterId: inv.matter_id,
+            branchId: inv.branch_id,
+            consultationId: inv.consultation_id,
+            consultationCode: inv.consultation_code,
+            items: typeof inv.items === 'string' ? JSON.parse(inv.items || '[]') : [],
+            taxAmount: inv.tax_amount,
+            totalAmount: inv.total_amount,
+            dueDate: inv.due_date,
+            paymentStatus: inv.payment_status,
+            approvalStatus: inv.approval_status,
+            approvalRequestId: inv.approval_request_id,
+            approvalNotes: inv.approval_notes,
+            paymentReference: inv.payment_reference,
+            paymentMethod: inv.payment_method,
+            createdAt: inv.created_at
+          })),
+          payments: (payments.results || []).map(p => ({
+            ...p,
+            paymentReference: p.payment_reference,
+            invoiceNumber: p.invoice_number,
+            clientName: p.client_name,
+            branchId: p.branch_id,
+            paymentMethod: p.payment_method,
+            paymentDate: p.payment_date,
+            bankTransactionRef: p.bank_transaction_ref,
+            receiptNumber: p.receipt_number,
+            verifiedById: p.verified_by_id,
+            verifiedByName: p.verified_by_name,
+            verificationDate: p.verification_date,
+            verificationNotes: p.verification_notes,
+            proofDocumentUrl: p.proof_document_url,
+            submittedAt: p.submitted_at
+          })),
+          expenses: expenses.results || [],
+          students: (students.results || []).map(s => ({
+            ...s,
+            studentId: s.student_id,
+            fullName: s.full_name,
+            institutionId: s.institution_id,
+            institutionName: s.institution_name,
+            matricNumber: s.matric_number,
+            placementType: s.placement_type,
+            placementStartDate: s.placement_start_date,
+            placementEndDate: s.placement_end_date,
+            assignedBranchId: s.assigned_branch_id,
+            supervisingCounselId: s.supervising_counsel_id,
+            emergencyContactName: s.emergency_contact_name,
+            emergencyContactPhone: s.emergency_contact_phone,
+            completionLetterIssued: Boolean(s.completion_letter_issued),
+            certificateNumber: s.certificate_number,
+            createdAt: s.created_at
+          })),
+          documents: (documents.results || []).map(d => ({
+            ...d,
+            documentId: d.document_id,
+            branchId: d.branch_id,
+            entityType: d.entity_type,
+            entityId: d.entity_id,
+            fileUrl: d.file_url,
+            fileSize: d.file_size,
+            fileType: d.file_type,
+            uploadedById: d.uploaded_by_id,
+            uploadedByName: d.uploaded_by_name,
+            uploadDate: d.upload_date,
+            isClientVisible: Boolean(d.is_client_visible),
+            googleDriveLink: d.google_drive_link
+          })),
+          correspondence: correspondence.results || [],
+          legalResearch: (legalResearch.results || []).map(lr => ({
+            ...lr,
+            legalIssue: lr.legal_issue,
+            caseAuthorities: lr.case_authorities,
+            legalNotes: lr.legal_notes,
+            matterId: lr.matter_id,
+            caseId: lr.case_id,
+            counselId: lr.counsel_id,
+            counselName: lr.counsel_name
+          })),
+          appointments: appointments.results || [],
+          publicNotices: (publicNotices.results || []).map(pn => ({
+            ...pn,
+            publishDate: pn.publish_date,
+            expiryDate: pn.expiry_date,
+            publishedById: pn.published_by_id,
+            publishedByName: pn.published_by_name
+          })),
+          publicEnquiries: publicEnquiries.results || [],
+          websiteContent: websiteContent ? {
+            tagline: websiteContent.tagline,
+            heroHeadline: websiteContent.hero_headline,
+            heroSubheadline: websiteContent.hero_subheadline,
+            aboutStory: websiteContent.about_story,
+            aboutFoundingYear: websiteContent.about_founding_year,
+            officeHoursText: websiteContent.office_hours_text,
+            emergencyHotline: websiteContent.emergency_hotline,
+            consultationFeeStandard: websiteContent.consultation_fee_standard,
+            internshipPolicyNotice: websiteContent.internship_policy_notice,
+            recoveryOfPremisesNotice: websiteContent.recovery_of_premises_notice,
+            invoiceBankName: websiteContent.invoice_bank_name,
+            invoiceAccountName: websiteContent.invoice_account_name,
+            invoiceAccountNumber: websiteContent.invoice_account_number,
+            invoicePaymentMethod: websiteContent.invoice_payment_method,
+            lastUpdated: websiteContent.last_updated,
+            updatedBy: websiteContent.updated_by
+          } : null,
+          auditLogs: (auditLogs.results || []).map(al => ({
+            id: al.id,
+            timestamp: al.timestamp,
+            userId: al.user_id,
+            userName: al.user_name,
+            userRole: al.user_role,
+            action: al.action,
+            entity: al.entity,
+            entityId: al.entity_id,
+            details: al.details
+          }))
+        }
       });
     }
 
-    // =========================================================================
-    // 6. PUBLIC TRACKING (REAL-TIME READ FROM D1)
-    // =========================================================================
-
-    if (path.startsWith('/api/tracking/') && method === 'GET') {
-      const code = decodeURIComponent(path.replace('/api/tracking/', '')).trim();
-      if (!code) return errorResponse('Tracking code required', 400);
-
-      // 1. Check Consultation
-      const consult = await db.prepare(`
-        SELECT code, service_category as serviceCategory, preferred_date as preferredDate,
-               preferred_time as preferredTime, full_name as fullName, status, invoice_number as invoiceNumber,
-               payment_reference as paymentReference, branch_id as branchId, client_visible_update as clientVisibleUpdate
-        FROM consultations WHERE code = ? OR payment_reference = ? OR invoice_number = ?
-      `).bind(code, code, code).first();
-
-      if (consult) {
-        return jsonResponse({
-          success: true,
-          type: 'Consultation',
-          record: consult
-        });
+    // --------------------------------------------------------------------------
+    // 4. CLIENTS ENDPOINTS
+    // --------------------------------------------------------------------------
+    if (path === '/api/clients') {
+      if (request.method === 'GET') {
+        const rows = await db.prepare('SELECT * FROM clients ORDER BY date_registered DESC').all<any>();
+        return jsonResponse({ success: true, clients: rows.results || [] });
       }
 
-      // 2. Check Case by Suit Number or Case ID
-      const caseRecord = await db.prepare(`
-        SELECT case_id as caseId, suit_number as suitNumber, case_type as caseType,
-               subject_matter as subjectMatter, filing_date as filingDate, next_court_date as nextCourtDate,
-               status, client_visible_update as clientVisibleUpdate
-        FROM cases WHERE case_id = ? OR UPPER(suit_number) = UPPER(?)
-      `).bind(code, code).first();
-
-      if (caseRecord) {
-        return jsonResponse({
-          success: true,
-          type: 'Case',
-          record: caseRecord
-        });
-      }
-
-      // 3. Check Tenant by tracking code
-      const tenantRecord = await db.prepare(`
-        SELECT tenant_id as tenantId, full_name as fullName, unit_number as unitNumber,
-               tracking_code as trackingCode, status, date_registered as dateRegistered
-        FROM tenants WHERE tracking_code = ? OR tenant_id = ?
-      `).bind(code, code).first();
-
-      if (tenantRecord) {
-        return jsonResponse({
-          success: true,
-          type: 'Tenancy',
-          record: tenantRecord
-        });
-      }
-
-      // 4. Check Student Internship by Student ID or Matric
-      const studentRecord = await db.prepare(`
-        SELECT student_id as studentId, full_name as fullName, institution_name as institutionName,
-               faculty, level, status, placement_start_date as placementStartDate,
-               placement_end_date as placementEndDate, completion_letter_issued as completionLetterIssued
-        FROM students WHERE student_id = ? OR matric_number = ?
-      `).bind(code, code).first();
-
-      if (studentRecord) {
-        return jsonResponse({
-          success: true,
-          type: 'Internship',
-          record: studentRecord
-        });
-      }
-
-      // 5. Check Invoice / Payment Reference directly
-      const invRecord = await db.prepare(`
-        SELECT invoice_number as invoiceNumber, client_name as clientName, total_amount as totalAmount,
-               date, due_date as dueDate, payment_status as paymentStatus, payment_reference as paymentReference
-        FROM invoices WHERE invoice_number = ? OR payment_reference = ?
-      `).bind(code, code).first();
-
-      if (invRecord) {
-        return jsonResponse({
-          success: true,
-          type: 'Invoice',
-          record: invRecord
-        });
-      }
-
-      return errorResponse(`No active Chambers records found matching tracking code "${code}".`, 404);
-    }
-
-    // =========================================================================
-    // 7. WEBSITE CMS CONTENT
-    // =========================================================================
-
-    if (path === '/api/website-content' && method === 'GET') {
-      const cms = await db.prepare(`
-        SELECT id, tagline, hero_headline as heroHeadline, hero_subheadline as heroSubheadline,
-               about_story as aboutStory, about_founding_year as aboutFoundingYear,
-               office_hours_text as officeHoursText, emergency_hotline as emergencyHotline,
-               consultation_fee_standard as consultationFeeStandard,
-               internship_policy_notice as internshipPolicyNotice,
-               recovery_of_premises_notice as recoveryOfPremisesNotice,
-               invoice_bank_name as invoiceBankName, invoice_account_name as invoiceAccountName,
-               invoice_account_number as invoiceAccountNumber, invoice_payment_method as invoicePaymentMethod,
-               last_updated as lastUpdated, updated_by as updatedBy
-        FROM website_content WHERE id = 'cms-main'
-      `).first();
-
-      return jsonResponse({ success: true, content: cms || INITIAL_CMS_SEED });
-    }
-
-    if (path === '/api/website-content' && method === 'PUT') {
-      const data = await request.json().catch(() => ({}));
-      const actor = {
-        id: request.headers.get('X-User-Id') || 'usr-principal-01',
-        name: 'Authorized Executive',
-        role: request.headers.get('X-User-Role') || 'PRINCIPAL_PARTNER'
-      };
-
-      await db.prepare(`
-        UPDATE website_content
-        SET tagline = ?, hero_headline = ?, hero_subheadline = ?, about_story = ?,
-            about_founding_year = ?, office_hours_text = ?, emergency_hotline = ?,
-            consultation_fee_standard = ?, internship_policy_notice = ?,
-            recovery_of_premises_notice = ?, invoice_bank_name = ?,
-            invoice_account_name = ?, invoice_account_number = ?,
-            invoice_payment_method = ?, last_updated = datetime('now'), updated_by = ?
-        WHERE id = 'cms-main'
-      `).bind(
-        data.tagline, data.heroHeadline, data.heroSubheadline, data.aboutStory,
-        data.aboutFoundingYear, data.officeHoursText, data.emergencyHotline,
-        data.consultationFeeStandard, data.internshipPolicyNotice,
-        data.recoveryOfPremisesNotice, data.invoiceBankName,
-        data.invoiceAccountName, data.invoiceAccountNumber,
-        data.invoicePaymentMethod, actor.name
-      ).run();
-
-      await logD1Audit(db, actor, 'UPDATE_WEBSITE_CONTENT', 'WebsiteContent', 'cms-main', 'Updated public website CMS content');
-
-      return jsonResponse({ success: true, message: 'Saved successfully' });
-    }
-
-    // =========================================================================
-    // 8. CONSULTATIONS & BOOKINGS
-    // =========================================================================
-
-    if (path === '/api/consultations' && method === 'GET') {
-      const rows = await db.prepare(`
-        SELECT id, code, service_category as serviceCategory, preferred_date as preferredDate,
-               preferred_time as preferredTime, full_name as fullName, phone, email, method,
-               brief_enquiry as briefEnquiry, supporting_documents as supportingDocuments,
-               status, invoice_number as invoiceNumber, payment_reference as paymentReference,
-               branch_id as branchId, assigned_lawyer_id as assignedLawyerId,
-               client_visible_update as clientVisibleUpdate, created_at as createdAt
-        FROM consultations ORDER BY created_at DESC
-      `).all();
-      const consultations = (rows.results || []).map((c: any) => ({
-        ...c,
-        supportingDocuments: typeof c.supportingDocuments === 'string' ? JSON.parse(c.supportingDocuments || '[]') : c.supportingDocuments
-      }));
-      return jsonResponse({ success: true, consultations });
-    }
-
-    if (path === '/api/consultations' && method === 'POST') {
-      const data = await request.json().catch(() => ({}));
-      const code = data.code || await getNextD1Number(db, 'consultation', 'CONS');
-      const invoiceNum = data.invoiceNumber || await getNextD1Number(db, 'invoice', 'INV');
-      const paymentRef = data.paymentReference || await getNextD1Number(db, 'payment', 'PAY');
-      const id = data.id || `cons-${Date.now()}`;
-
-      await db.prepare(`
-        INSERT INTO consultations (
-          id, code, service_category, preferred_date, preferred_time, full_name,
-          phone, email, method, brief_enquiry, supporting_documents, status,
-          invoice_number, payment_reference, branch_id, assigned_lawyer_id,
-          client_visible_update, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-      `).bind(
-        id, code, data.serviceCategory, data.preferredDate, data.preferredTime, data.fullName,
-        data.phone, data.email, data.method, data.briefEnquiry, JSON.stringify(data.supportingDocuments || []),
-        data.status || 'Awaiting Payment', invoiceNum, paymentRef, data.branchId || 'br-abuja-01',
-        data.assignedLawyerId || null,
-        data.clientVisibleUpdate || 'Consultation booking received. Awaiting retainer transfer.'
-      ).run();
-
-      // Automatically create matching invoice in D1
-      const fee = data.feeAmount || 35000;
-      await db.prepare(`
-        INSERT OR IGNORE INTO invoices (
-          id, invoice_number, client_name, client_email, client_phone, branch_id,
-          consultation_id, consultation_code, items, subtotal, tax_amount, total_amount,
-          date, due_date, payment_status, payment_reference, notes, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 'UNPAID', ?, ?, datetime('now'))
-      `).bind(
-        `inv-${Date.now()}`, invoiceNum, data.fullName, data.email, data.phone, data.branchId || 'br-abuja-01',
-        id, code, JSON.stringify([{ description: `Legal Consultation (${data.serviceCategory})`, amount: fee }]),
-        fee, fee, new Date().toISOString().split('T')[0], data.preferredDate, paymentRef,
-        `Consultation Reference: ${code}. Quote payment reference ${paymentRef} upon transfer.`
-      ).run();
-
-      const created = {
-        ...data,
-        id,
-        code,
-        invoiceNumber: invoiceNum,
-        paymentReference: paymentRef,
-        status: data.status || 'Awaiting Payment',
-        supportingDocuments: data.supportingDocuments || []
-      };
-
-      return jsonResponse({ success: true, consultation: created, invoiceNumber: invoiceNum, paymentRef, message: 'Saved successfully' });
-    }
-
-    if (path.startsWith('/api/consultations/') && method === 'PUT') {
-      const id = path.replace('/api/consultations/', '');
-      const data = await request.json().catch(() => ({}));
-      await db.prepare(`
-        UPDATE consultations
-        SET service_category = ?, preferred_date = ?, preferred_time = ?, full_name = ?,
-            phone = ?, email = ?, method = ?, brief_enquiry = ?, status = ?,
-            branch_id = ?, assigned_lawyer_id = ?, client_visible_update = ?
-        WHERE id = ?
-      `).bind(
-        data.serviceCategory, data.preferredDate, data.preferredTime, data.fullName,
-        data.phone, data.email, data.method, data.briefEnquiry, data.status,
-        data.branchId, data.assignedLawyerId || null, data.clientVisibleUpdate || null,
-        id
-      ).run();
-      return jsonResponse({ success: true, consultation: data, message: 'Saved successfully' });
-    }
-
-    // =========================================================================
-    // 9. MATTERS & RETAINERS
-    // =========================================================================
-
-    if (path === '/api/matters' && method === 'GET') {
-      const rows = await db.prepare(`
-        SELECT id, matter_id as matterId, title, client_id as clientId, branch_id as branchId,
-               lead_counsel_id as leadCounselId, category, status, stage, engagement_date as engagementDate,
-               client_visible_update as clientVisibleUpdate, privileged_internal_notes as privilegedInternalNotes,
-               requires_principal_approval as requiresPrincipalApproval, principal_approval_status as principalApprovalStatus,
-               created_at as createdAt
-        FROM matters ORDER BY created_at DESC
-      `).all();
-      return jsonResponse({ success: true, matters: rows.results || [] });
-    }
-
-    if (path === '/api/matters' && method === 'POST') {
-      const data = await request.json().catch(() => ({}));
-      const matterId = data.matterId || await getNextD1Number(db, 'matter', 'MAT');
-      const id = data.id || `mat-${Date.now()}`;
-
-      await db.prepare(`
-        INSERT INTO matters (
-          id, matter_id, title, client_id, branch_id, lead_counsel_id,
-          category, status, stage, engagement_date, client_visible_update,
-          privileged_internal_notes, requires_principal_approval, principal_approval_status, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-      `).bind(
-        id, matterId, data.title, data.clientId, data.branchId || 'br-abuja-01',
-        data.leadCounselId || 'usr-counsel-01', data.category || 'Litigation',
-        data.status || 'Active', data.stage || 'Pleadings Preparation',
-        data.engagementDate || new Date().toISOString().split('T')[0],
-        data.clientVisibleUpdate || '', data.privilegedInternalNotes || '',
-        data.requiresPrincipalApproval ? 1 : 0, data.principalApprovalStatus || null
-      ).run();
-
-      const created = { ...data, id, matterId };
-      return jsonResponse({ success: true, matter: created, message: 'Saved successfully' });
-    }
-
-    if (path.startsWith('/api/matters/') && method === 'PUT') {
-      const id = path.replace('/api/matters/', '');
-      const data = await request.json().catch(() => ({}));
-      await db.prepare(`
-        UPDATE matters
-        SET title = ?, client_id = ?, branch_id = ?, lead_counsel_id = ?, category = ?,
-            status = ?, stage = ?, engagement_date = ?, client_visible_update = ?,
-            privileged_internal_notes = ?, requires_principal_approval = ?, principal_approval_status = ?
-        WHERE id = ?
-      `).bind(
-        data.title, data.clientId, data.branchId, data.leadCounselId, data.category,
-        data.status, data.stage, data.engagementDate, data.clientVisibleUpdate || '',
-        data.privilegedInternalNotes || '', data.requiresPrincipalApproval ? 1 : 0,
-        data.principalApprovalStatus || null, id
-      ).run();
-      return jsonResponse({ success: true, matter: data, message: 'Saved successfully' });
-    }
-
-    // =========================================================================
-    // 10. CASES & CAUSE LISTS
-    // =========================================================================
-
-    if (path === '/api/cases' && method === 'GET') {
-      const rows = await db.prepare(`
-        SELECT id, case_id as caseId, suit_number as suitNumber, matter_id as matterId,
-               client_id as clientId, branch_id as branchId, court_id as courtId,
-               judicial_division as judicialDivision, judge, counsel_id as counselId,
-               opposing_party as opposingParty, opposing_counsel as opposingCounsel,
-               case_type as caseType, subject_matter as subjectMatter, filing_date as filingDate,
-               next_court_date as nextCourtDate, status, client_visible_update as clientVisibleUpdate,
-               internal_strategy_notes as internalStrategyNotes, created_at as createdAt
-        FROM cases ORDER BY created_at DESC
-      `).all();
-      return jsonResponse({ success: true, cases: rows.results || [] });
-    }
-
-    if (path === '/api/cases' && method === 'POST') {
-      const data = await request.json().catch(() => ({}));
-      const caseId = data.caseId || await getNextD1Number(db, 'case', 'CASE');
-      const id = data.id || `case-${Date.now()}`;
-
-      await db.prepare(`
-        INSERT INTO cases (
-          id, case_id, suit_number, matter_id, client_id, branch_id, court_id,
-          judicial_division, judge, counsel_id, opposing_party, opposing_counsel,
-          case_type, subject_matter, filing_date, next_court_date, status,
-          client_visible_update, internal_strategy_notes, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-      `).bind(
-        id, caseId, data.suitNumber, data.matterId, data.clientId, data.branchId || null,
-        data.courtId, data.judicialDivision || 'Abuja Judicial Division', data.judge || null,
-        data.counselId || 'usr-counsel-01', data.opposingParty, data.opposingCounsel || null,
-        data.caseType || 'Civil', data.subjectMatter, data.filingDate || new Date().toISOString().split('T')[0],
-        data.nextCourtDate || null, data.status || 'Hearing', data.clientVisibleUpdate || '',
-        data.internalStrategyNotes || ''
-      ).run();
-
-      const created = { ...data, id, caseId };
-      return jsonResponse({ success: true, caseRecord: created, message: 'Saved successfully' });
-    }
-
-    if (path.startsWith('/api/cases/') && method === 'PUT') {
-      const id = path.replace('/api/cases/', '');
-      const data = await request.json().catch(() => ({}));
-      await db.prepare(`
-        UPDATE cases
-        SET suit_number = ?, matter_id = ?, client_id = ?, branch_id = ?, court_id = ?,
-            judicial_division = ?, judge = ?, counsel_id = ?, opposing_party = ?,
-            opposing_counsel = ?, case_type = ?, subject_matter = ?, filing_date = ?,
-            next_court_date = ?, status = ?, client_visible_update = ?, internal_strategy_notes = ?
-        WHERE id = ?
-      `).bind(
-        data.suitNumber, data.matterId, data.clientId, data.branchId || null, data.courtId,
-        data.judicialDivision, data.judge || null, data.counselId, data.opposingParty,
-        data.opposingCounsel || null, data.caseType, data.subjectMatter, data.filingDate,
-        data.nextCourtDate || null, data.status, data.clientVisibleUpdate || '',
-        data.internalStrategyNotes || '', id
-      ).run();
-      return jsonResponse({ success: true, caseRecord: data, message: 'Saved successfully' });
-    }
-
-    // =========================================================================
-    // 11. CASE ASSIGNMENTS, COURT DIARY & TASKS
-    // =========================================================================
-
-    if (path === '/api/case-assignments' && method === 'POST') {
-      const data = await request.json().catch(() => ({}));
-      const id = data.id || `assign-${Date.now()}`;
-      await db.prepare(`
-        INSERT INTO case_assignments (
-          id, case_id, suit_number, branch_id, counsel_id, assigned_by_id,
-          assigned_by_name, date_assigned, status, rejection_reason, rejection_notes, response_date
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).bind(
-        id, data.caseId, data.suitNumber, data.branchId || null, data.counselId,
-        data.assignedById, data.assignedByName, data.dateAssigned || new Date().toISOString().split('T')[0],
-        data.status || 'PENDING', data.rejectionReason || null, data.rejectionNotes || null, data.responseDate || null
-      ).run();
-      return jsonResponse({ success: true, assignment: { ...data, id }, message: 'Saved successfully' });
-    }
-
-    if (path === '/api/court-diary' && method === 'POST') {
-      const data = await request.json().catch(() => ({}));
-      const id = data.id || `diary-${Date.now()}`;
-      await db.prepare(`
-        INSERT INTO court_diary (
-          id, case_id, suit_number, branch_id, court_date, court_time, court_name,
-          counsel_id, client_id, purpose, status, outcome_summary, next_court_date, notes
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).bind(
-        id, data.caseId, data.suitNumber, data.branchId || null, data.courtDate,
-        data.courtTime || null, data.courtName, data.counselId, data.clientId,
-        data.purpose, data.status || 'Scheduled', data.outcomeSummary || null,
-        data.nextCourtDate || null, data.notes || null
-      ).run();
-      return jsonResponse({ success: true, diaryEntry: { ...data, id }, message: 'Saved successfully' });
-    }
-
-    if (path === '/api/tasks' && method === 'POST') {
-      const data = await request.json().catch(() => ({}));
-      const id = data.id || `task-${Date.now()}`;
-      await db.prepare(`
-        INSERT INTO tasks (
-          id, title, assigned_to_id, assigned_by_id, branch_id, matter_id,
-          case_id, priority, due_date, status, completion_date, notes, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-      `).bind(
-        id, data.title, data.assignedToId, data.assignedById, data.branchId || null,
-        data.matterId || null, data.caseId || null, data.priority || 'Medium',
-        data.dueDate, data.status || 'Pending', data.completionDate || null, data.notes || null
-      ).run();
-      return jsonResponse({ success: true, task: { ...data, id }, message: 'Saved successfully' });
-    }
-
-    if (path.startsWith('/api/tasks/') && method === 'PUT') {
-      const id = path.replace('/api/tasks/', '');
-      const data = await request.json().catch(() => ({}));
-      await db.prepare(`
-        UPDATE tasks
-        SET title = ?, assigned_to_id = ?, priority = ?, due_date = ?, status = ?,
-            completion_date = ?, notes = ?
-        WHERE id = ?
-      `).bind(
-        data.title, data.assignedToId, data.priority, data.dueDate, data.status,
-        data.completionDate || null, data.notes || null, id
-      ).run();
-      return jsonResponse({ success: true, task: data, message: 'Saved successfully' });
-    }
-
-    // =========================================================================
-    // 12. PROPERTIES, LANDLORDS, TENANTS & TENANCIES
-    // =========================================================================
-
-    if (path === '/api/properties' && method === 'POST') {
-      const data = await request.json().catch(() => ({}));
-      const propId = data.propertyId || await getNextD1Number(db, 'property', 'PROP');
-      const id = data.id || `prop-${Date.now()}`;
-      await db.prepare(`
-        INSERT INTO properties (
-          id, property_id, branch_id, name, property_type, address, state, lga,
-          district, landlord_id, total_units, title_information, survey_information,
-          legal_status, assigned_lawyer_id, related_client_id, related_matter_id, notes, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-      `).bind(
-        id, propId, data.branchId || null, data.name, data.propertyType, data.address,
-        data.state, data.lga, data.district, data.landlordId, data.totalUnits || 1,
-        data.titleInformation || '', data.surveyInformation || '', data.legalStatus || 'Managed by Chambers',
-        data.assignedLawyerId || 'usr-counsel-01', data.relatedClientId || null,
-        data.relatedMatterId || null, data.notes || null
-      ).run();
-      return jsonResponse({ success: true, property: { ...data, id, propertyId: propId }, message: 'Saved successfully' });
-    }
-
-    if (path === '/api/landlords' && method === 'POST') {
-      const data = await request.json().catch(() => ({}));
-      const llId = data.landlordId || await getNextD1Number(db, 'landlord', 'LL');
-      const trackingCode = data.trackingCode || await getNextD1Number(db, 'tracking', 'TRK');
-      const id = data.id || `ll-${Date.now()}`;
-      await db.prepare(`
-        INSERT INTO landlords (
-          id, landlord_id, full_name, phone, email, address, bank_details, tracking_code, date_registered
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).bind(
-        id, llId, data.fullName, data.phone, data.email, data.address, data.bankDetails || null,
-        trackingCode, new Date().toISOString().split('T')[0]
-      ).run();
-      return jsonResponse({ success: true, landlord: { ...data, id, landlordId: llId, trackingCode }, message: 'Saved successfully' });
-    }
-
-    if (path === '/api/tenants' && method === 'POST') {
-      const data = await request.json().catch(() => ({}));
-      const tenantId = data.tenantId || await getNextD1Number(db, 'tenant', 'TEN');
-      const trackingCode = data.trackingCode || await getNextD1Number(db, 'tenant_track', 'TRK');
-      const id = data.id || `ten-${Date.now()}`;
-      await db.prepare(`
-        INSERT INTO tenants (
-          id, tenant_id, full_name, phone, email, landlord_id, property_id,
-          unit_number, tracking_code, occupation, status, date_registered
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).bind(
-        id, tenantId, data.fullName, data.phone, data.email, data.landlordId,
-        data.propertyId, data.unitNumber, trackingCode, data.occupation || null,
-        data.status || 'Active', new Date().toISOString().split('T')[0]
-      ).run();
-      return jsonResponse({ success: true, tenant: { ...data, id, tenantId, trackingCode }, message: 'Saved successfully' });
-    }
-
-    if (path === '/api/tenancies' && method === 'POST') {
-      const data = await request.json().catch(() => ({}));
-      const id = data.id || `tcy-${Date.now()}`;
-      await db.prepare(`
-        INSERT INTO tenancies (
-          id, tenant_id, property_id, unit_number, rent_amount, start_date,
-          expiry_date, payment_frequency, status, arrears_amount, tenancy_agreement_doc_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).bind(
-        id, data.tenantId, data.propertyId, data.unitNumber, data.rentAmount,
-        data.startDate, data.expiryDate, data.paymentFrequency || 'Annual',
-        data.status || 'Active', data.arrearsAmount || 0, data.tenancyAgreementDocId || null
-      ).run();
-      return jsonResponse({ success: true, tenancy: { ...data, id }, message: 'Saved successfully' });
-    }
-
-    if (path === '/api/quit-notices' && method === 'POST') {
-      const data = await request.json().catch(() => ({}));
-      const qnId = data.quitNoticeId || await getNextD1Number(db, 'quit_notice', 'QNT');
-      const id = data.id || `qn-${Date.now()}`;
-      await db.prepare(`
-        INSERT INTO quit_notices (
-          id, quit_notice_id, tenant_id, tenant_name, property_id, property_name,
-          landlord_id, landlord_name, unit_number, notice_type, notice_date,
-          notice_expiry_date, reason, statutory_basis, status, issued_by_id, issued_by_name, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-      `).bind(
-        id, qnId, data.tenantId, data.tenantName, data.propertyId, data.propertyName,
-        data.landlordId, data.landlordName, data.unitNumber, data.noticeType, data.noticeDate,
-        data.noticeExpiryDate, data.reason, data.statutoryBasis, data.status || 'Issued',
-        data.issuedById, data.issuedByName
-      ).run();
-      return jsonResponse({ success: true, quitNotice: { ...data, id, quitNoticeId: qnId }, message: 'Saved successfully' });
-    }
-
-    // =========================================================================
-    // 13. STUDENTS, RESEARCH, DOCUMENTS, APPROVALS, AUDITS, USERS
-    // =========================================================================
-
-    if (path === '/api/students' && method === 'POST') {
-      const data = await request.json().catch(() => ({}));
-      const studentId = data.studentId || await getNextD1Number(db, 'student', 'STU');
-      const id = data.id || `stu-${Date.now()}`;
-      await db.prepare(`
-        INSERT INTO students (
-          id, student_id, full_name, gender, phone, email, institution_id,
-          institution_name, faculty, programme, level, matric_number, placement_type,
-          placement_start_date, placement_end_date, assigned_branch_id, supervising_counsel_id,
-          emergency_contact_name, emergency_contact_phone, status, completion_letter_issued,
-          certificate_number, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-      `).bind(
-        id, studentId, data.fullName, data.gender || null, data.phone, data.email,
-        data.institutionId, data.institutionName, data.faculty, data.programme, data.level,
-        data.matricNumber, data.placementType || 'Institution-Referred', data.placementStartDate,
-        data.placementEndDate, data.assignedBranchId || 'br-abuja-01', data.supervisingCounselId || 'usr-counsel-01',
-        data.emergencyContactName || null, data.emergencyContactPhone || null,
-        data.status || 'Application Received', data.completionLetterIssued ? 1 : 0,
-        data.certificateNumber || null
-      ).run();
-      return jsonResponse({ success: true, student: { ...data, id, studentId }, message: 'Saved successfully' });
-    }
-
-    if (path === '/api/expenses' && method === 'POST') {
-      const data = await request.json().catch(() => ({}));
-      const id = data.id || `exp-${Date.now()}`;
-      await db.prepare(`
-        INSERT INTO expenses (
-          id, branch_id, account_type, category, amount, description, date,
-          recorded_by_id, recorded_by_name, matter_id, property_id, receipt_ref, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-      `).bind(
-        id, data.branchId || 'br-abuja-01', data.accountType || 'Law Firm Revenue',
-        data.category || 'Administrative expenses', data.amount, data.description,
-        data.date || new Date().toISOString().split('T')[0], data.recordedById, data.recordedByName,
-        data.matterId || null, data.propertyId || null, data.receiptRef || null
-      ).run();
-      return jsonResponse({ success: true, expense: { ...data, id }, message: 'Saved successfully' });
-    }
-
-    if (path === '/api/legal-research' && method === 'POST') {
-      const data = await request.json().catch(() => ({}));
-      const id = data.id || `res-${Date.now()}`;
-      await db.prepare(`
-        INSERT INTO legal_research (
-          id, topic, legal_issue, branch_id, statutes, case_authorities, legal_notes,
-          matter_id, case_id, counsel_id, counsel_name, date
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).bind(
-        id, data.topic, data.legalIssue, data.branchId || null, data.statutes,
-        data.caseAuthorities, data.legalNotes, data.matterId || null, data.caseId || null,
-        data.counselId, data.counselName, data.date || new Date().toISOString().split('T')[0]
-      ).run();
-      return jsonResponse({ success: true, research: { ...data, id }, message: 'Saved successfully' });
-    }
-
-    if (path === '/api/documents' && method === 'POST') {
-      const data = await request.json().catch(() => ({}));
-      const docId = data.documentId || await getNextD1Number(db, 'document', 'DOC');
-      const id = data.id || `doc-${Date.now()}`;
-      await db.prepare(`
-        INSERT INTO documents (
-          id, document_id, title, branch_id, category, entity_type, entity_id,
-          file_url, file_size, file_type, uploaded_by_id, uploaded_by_name,
-          version, upload_date, is_client_visible, notes, google_drive_link
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).bind(
-        id, docId, data.title, data.branchId || null, data.category, data.entityType || null,
-        data.entityId || null, data.fileUrl || null, data.fileSize || '1.2 MB',
-        data.fileType || 'PDF', data.uploadedById, data.uploadedByName,
-        data.version || '1.0', data.uploadDate || new Date().toISOString().split('T')[0],
-        data.isClientVisible ? 1 : 0, data.notes || null, data.googleDriveLink || null
-      ).run();
-      return jsonResponse({ success: true, document: { ...data, id, documentId: docId }, message: 'Saved successfully' });
-    }
-
-    if (path === '/api/public-notices' && method === 'POST') {
-      const data = await request.json().catch(() => ({}));
-      const id = data.id || `not-${Date.now()}`;
-      await db.prepare(`
-        INSERT INTO public_notices (
-          id, title, category, content, publish_date, expiry_date, status, published_by_id, published_by_name
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).bind(
-        id, data.title, data.category, data.content, data.publishDate || new Date().toISOString().split('T')[0],
-        data.expiryDate || null, data.status || 'Published', data.publishedById, data.publishedByName
-      ).run();
-      return jsonResponse({ success: true, notice: { ...data, id }, message: 'Saved successfully' });
-    }
-
-    if (path === '/api/approvals' && method === 'POST') {
-      const data = await request.json().catch(() => ({}));
-      const id = data.id || `appr-${Date.now()}`;
-      await db.prepare(`
-        INSERT INTO approval_requests (
-          id, request_type, requester_id, requester_name, requester_role, branch_id,
-          title, description, reference_code, status, submitted_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-      `).bind(
-        id, data.requestType, data.requesterId, data.requesterName, data.requesterRole,
-        data.branchId || 'br-abuja-01', data.title, data.description,
-        data.referenceCode || null, data.status || 'PENDING_PRINCIPAL_PARTNER_APPROVAL'
-      ).run();
-      return jsonResponse({ success: true, approval: { ...data, id }, message: 'Saved successfully' });
-    }
-
-    if (path.startsWith('/api/approvals/') && method === 'PUT') {
-      const id = path.replace('/api/approvals/', '');
-      const data = await request.json().catch(() => ({}));
-      await db.prepare(`
-        UPDATE approval_requests
-        SET status = ?, decided_at = datetime('now'), decided_by_id = ?,
-            decided_by_name = ?, decision_notes = ?
-        WHERE id = ?
-      `).bind(data.status, data.decidedById, data.decidedByName, data.decisionNotes || '', id).run();
-      return jsonResponse({ success: true, approval: data, message: 'Saved successfully' });
-    }
-
-    // POST /api/users — Provision a new Chambers personnel account
-    if (path === '/api/users' && method === 'POST') {
-      const data = await request.json().catch(() => ({}));
-      const actorRole = request.headers.get('X-User-Role') || '';
-      const accountCreatorRoles = ['PRINCIPAL_PARTNER', 'HEAD_OF_CHAMBER'];
-      if (!accountCreatorRoles.includes(actorRole)) {
-        return errorResponse('Unauthorized: only the Principal Partner or Head of Chamber can create accounts.', 403);
-      }
-      if (data.role === 'PRINCIPAL_PARTNER' && actorRole !== 'PRINCIPAL_PARTNER') {
-        return errorResponse('Unauthorized: only the Principal Partner can provision Principal Partner accounts.', 403);
-      }
-      if (!data.id || !data.username) return errorResponse('User id and username are required', 400);
-
-      await db.prepare(`
-        INSERT INTO users (
-          id, username, name, email, phone, role, branch_id, title, practice_areas,
-          bio, photo_url, availability, is_publicly_visible, is_active, account_status,
-          password_hash, salt, requires_password_change, failed_login_attempts, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, datetime('now'))
-      `).bind(
-        data.id, String(data.username).toLowerCase(), data.name, data.email, data.phone,
-        data.role, data.branchId, data.title,
-        JSON.stringify(data.practiceAreas || []), data.bio || '', data.photoUrl || '',
-        data.availability || 'AVAILABLE', data.isPubliclyVisible ? 1 : 0, 1,
-        data.accountStatus || 'Active', data.passwordHash || '', data.salt || '',
-        data.requiresPasswordChange ? 1 : 0
-      ).run();
-
-      await logD1Audit(db, { id: request.headers.get('X-User-Id') || 'system', name: 'Authorized Executive', role: actorRole }, 'CREATE_USER_ACCOUNT', 'User', data.id, `Created account for ${data.name} (${data.username})`);
-      return jsonResponse({ success: true, user: data, message: 'Saved successfully' });
-    }
-
-    if (path.startsWith('/api/users/') && method === 'PUT') {
-      const id = path.replace('/api/users/', '');
-      const data = await request.json().catch(() => ({}));
-
-      const columnInfo = await db.prepare('PRAGMA table_info("users")').all();
-      const userColumns: string[] = (columnInfo.results || []).map((c: any) => c.name);
-      const toSnake = (key: string) => key.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
-
-      const pairs: Array<[string, any]> = [];
-      for (const [key, value] of Object.entries(data)) {
-        const col = toSnake(key);
-        if (!userColumns.includes(col) || col === 'id') continue;
-        let bound = value;
-        if (typeof bound === 'boolean') bound = bound ? 1 : 0;
-        else if (bound === undefined) bound = null;
-        else if (bound !== null && typeof bound === 'object') bound = JSON.stringify(bound);
-        pairs.push([col, bound]);
-      }
-
-      if (pairs.length > 0) {
-        const setClause = pairs.map(([c]) => `"${c}" = ?`).join(', ');
-        await db.prepare(`UPDATE users SET ${setClause} WHERE id = ?`)
-          .bind(...pairs.map(([, v]) => v), id).run();
-      }
-
-      await logD1Audit(db, { id: request.headers.get('X-User-Id') || 'system', name: 'Authorized Executive', role: request.headers.get('X-User-Role') || 'PRINCIPAL_PARTNER' }, 'UPDATE_USER_ACCOUNT', 'User', id, `Updated personnel account ${data.name || id}`);
-      return jsonResponse({ success: true, user: data, message: 'Saved successfully' });
-    }
-
-    // =========================================================================
-    // 9. GENERIC RELATIONAL RECORD API — every remaining Chambers module
-    // =========================================================================
-    // Authoritative server-side persistence for all firm collections through
-    // env.DB. Column names are resolved from the live D1 schema, so only real
-    // columns are ever written. Authorization is evaluated here on the server.
-    if (path.startsWith('/api/records/')) {
-      const segments = path.replace('/api/records/', '').split('/');
-      const table = segments[0];
-      const recordId = segments[1] ? decodeURIComponent(segments[1]) : null;
-
-      const WRITABLE_RECORD_TABLES = new Set([
-        'branches', 'courts', 'clients', 'consultations', 'matters', 'cases',
-        'case_assignments', 'court_diary', 'tasks', 'documents', 'correspondence',
-        'legal_research', 'appointments', 'properties', 'landlords', 'units',
-        'tenants', 'tenancies', 'rent_records', 'property_disputes', 'quit_notices',
-        'invoices', 'payments', 'expenses', 'students', 'internship_attendance',
-        'internship_evaluations', 'public_notices', 'public_enquiries',
-        'approval_requests', 'partner_institutions'
-      ]);
-
-      if (!WRITABLE_RECORD_TABLES.has(table)) {
-        return errorResponse(`Table "${table}" is not writable through this endpoint.`, 403);
-      }
-
-      // Public intake collections may be written by unauthenticated visitors
-      // (internship applications, website enquiries). Everything else requires
-      // an authenticated Chambers role evaluated here on the server.
-      const PUBLIC_WRITE_TABLES = new Set(['public_enquiries', 'students']);
-      const actorRole = request.headers.get('X-User-Role') || (PUBLIC_WRITE_TABLES.has(table) ? 'PUBLIC' : null);
-      if (!actorRole) {
-        return errorResponse('Unauthorized: an authenticated Chambers role is required for database writes.', 401);
-      }
-
-      const toSnake = (key: string) =>
-        key.replace(/([a-z0-9])([A-Z])/g, '$1_$2').replace(/[-\s]/g, '_').toLowerCase();
-
-      const buildPairs = (payload: any, columns: string[], targetId: string): Array<[string, any]> => {
-        const pairs: Array<[string, any]> = [];
-        for (const [key, value] of Object.entries(payload)) {
-          const col = toSnake(key);
-          if (!columns.includes(col)) continue;
-          let bound = value;
-          if (typeof bound === 'boolean') bound = bound ? 1 : 0;
-          else if (bound === undefined) bound = null;
-          else if (bound !== null && typeof bound === 'object') bound = JSON.stringify(bound);
-          pairs.push([col, bound]);
-        }
-        if (!pairs.some(([c]) => c === 'id')) pairs.push(['id', targetId]);
-        return pairs;
-      };
-
-      if (method === 'POST' || method === 'PUT') {
-        const data = await request.json().catch(() => ({}));
-        const targetId = recordId || data.id;
-        if (!targetId) return errorResponse('Record id is required', 400);
-
-        const columnInfo = await db.prepare(`PRAGMA table_info("${table}")`).all();
-        const columns: string[] = (columnInfo.results || []).map((c: any) => c.name);
-        const pairs = buildPairs(data, columns, targetId);
-        const nonIdPairs = pairs.filter(([c]) => c !== 'id');
-
-        if (method === 'PUT' && nonIdPairs.length === 0) {
-          return jsonResponse({ success: true, message: 'Nothing to update' });
+      if (request.method === 'POST') {
+        const body = await request.json() as any;
+        const clientId = body.clientId || await getNextNumber(db, 'client', 'CLI');
+        const id = body.id || `cli-${Date.now()}`;
+        const dateRegistered = body.dateRegistered || new Date().toISOString();
+
+        await db.prepare(
+          `INSERT INTO clients 
+           (id, client_id, full_name, organization, client_type, phone, email, address, state, lga, branch_id, assigned_lawyer_id, conflict_check_status, conflict_check_notes, conflict_reviewed_by, date_registered, is_active, confidential_notes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`
+        ).bind(
+          id, clientId, body.fullName, body.organization || null, body.clientType || 'Individual',
+          body.phone, body.email, body.address || '', body.state || 'FCT', body.lga || 'AMAC',
+          body.branchId || 'br-abuja-01', body.assignedLawyerId || null, body.conflictCheckStatus || 'Passed',
+          body.conflictCheckNotes || '', body.conflictReviewedBy || null, dateRegistered, body.confidentialNotes || ''
+        ).run();
+
+        const auth = await getAuthUser(request, db);
+        if (auth) {
+          await logAudit(db, auth.user.id, auth.user.name, auth.user.role, 'REGISTER_CLIENT', 'Client', id, `Registered client: ${body.fullName} (${clientId})`);
         }
 
-        if (method === 'POST') {
-          const columnList = pairs.map(([c]) => `"${c}"`).join(', ');
-          const placeholders = pairs.map(() => '?').join(', ');
-          const conflictUpdates = nonIdPairs.map(([c]) => `"${c}" = excluded."${c}"`).join(', ');
-          const sql = conflictUpdates
-            ? `INSERT INTO "${table}" (${columnList}) VALUES (${placeholders}) ON CONFLICT(id) DO UPDATE SET ${conflictUpdates}`
-            : `INSERT OR IGNORE INTO "${table}" (${columnList}) VALUES (${placeholders})`;
-          await db.prepare(sql).bind(...pairs.map(([, v]) => v)).run();
-        } else {
-          const setClause = nonIdPairs.map(([c]) => `"${c}" = ?`).join(', ');
-          await db.prepare(`UPDATE "${table}" SET ${setClause} WHERE id = ?`)
-            .bind(...nonIdPairs.map(([, v]) => v), targetId).run();
-        }
+        const createdClient: Client = {
+          id,
+          clientId,
+          fullName: body.fullName,
+          organization: body.organization,
+          clientType: body.clientType || 'Individual',
+          phone: body.phone,
+          email: body.email,
+          address: body.address || '',
+          state: body.state || 'FCT',
+          lga: body.lga || 'AMAC',
+          identificationType: body.identificationType,
+          identificationNumber: body.identificationNumber,
+          branchId: body.branchId || 'br-abuja-01',
+          assignedLawyerId: body.assignedLawyerId,
+          conflictCheckStatus: body.conflictCheckStatus || 'Passed',
+          conflictCheckNotes: body.conflictCheckNotes,
+          dateRegistered,
+          isActive: true,
+          confidentialNotes: body.confidentialNotes
+        };
 
-        await logD1Audit(
-          db,
-          { id: request.headers.get('X-User-Id') || 'system', name: 'Authorized Staff', role: actorRole },
-          method === 'POST' ? 'CREATE_RECORD' : 'UPDATE_RECORD',
-          table, targetId, `${method} ${table} record persisted to Cloudflare D1`
-        );
-        return jsonResponse({ success: true, message: 'Saved successfully' });
+        return jsonResponse({ success: true, client: createdClient });
       }
-
-      if (method === 'DELETE') {
-        const body = await request.json().catch(() => ({} as any));
-        const targetId = recordId || body.id;
-        if (!targetId) return errorResponse('Record id is required', 400);
-        await db.prepare(`DELETE FROM "${table}" WHERE id = ?`).bind(targetId).run();
-        await logD1Audit(
-          db,
-          { id: request.headers.get('X-User-Id') || 'system', name: 'Authorized Staff', role: actorRole },
-          'DELETE_RECORD', table, targetId, `DELETE ${table} record persisted to Cloudflare D1`
-        );
-        return jsonResponse({ success: true, message: 'Deleted successfully' });
-      }
-
-      return errorResponse(`Method ${method} is not supported for record table "${table}"`, 405);
     }
 
-    // Default 404 for unhandled API routes
-    return errorResponse(`Endpoint "${method} ${path}" not found`, 404);
+    if (path.startsWith('/api/clients/') && request.method === 'PUT') {
+      const id = path.replace('/api/clients/', '').trim();
+      const body = await request.json() as any;
+
+      await db.prepare(
+        `UPDATE clients 
+         SET full_name = ?, organization = ?, client_type = ?, phone = ?, email = ?, 
+             address = ?, state = ?, lga = ?, assigned_lawyer_id = ?, conflict_check_status = ?, 
+             conflict_check_notes = ?, confidential_notes = ?, is_active = ?
+         WHERE id = ?`
+      ).bind(
+        body.fullName, body.organization || null, body.clientType || 'Individual', body.phone, body.email,
+        body.address, body.state, body.lga, body.assignedLawyerId || null, body.conflictCheckStatus || 'Passed',
+        body.conflictCheckNotes || '', body.confidentialNotes || '', body.isActive ? 1 : 0, id
+      ).run();
+
+      const auth = await getAuthUser(request, db);
+      if (auth) {
+        await logAudit(db, auth.user.id, auth.user.name, auth.user.role, 'UPDATE_CLIENT', 'Client', id, `Updated client ${body.fullName}`);
+      }
+      return jsonResponse({ success: true });
+    }
+
+    // --------------------------------------------------------------------------
+    // 5. INVOICES & PAYMENTS (CRITICAL ROLE-ENFORCED)
+    // --------------------------------------------------------------------------
+    if (path === '/api/invoices') {
+      if (request.method === 'GET') {
+        const rows = await db.prepare('SELECT * FROM invoices ORDER BY created_at DESC').all<any>();
+        return jsonResponse({ success: true, invoices: rows.results || [] });
+      }
+
+      if (request.method === 'POST') {
+        const body = await request.json() as any;
+        const invoiceNumber = body.invoiceNumber || await getNextNumber(db, 'invoice', 'INV');
+        const paymentReference = body.paymentReference || await getNextNumber(db, 'payment', 'PAY');
+        const id = body.id || `inv-${Date.now()}`;
+
+        await db.prepare(
+          `INSERT INTO invoices 
+           (id, invoice_number, client_id, client_name, client_email, client_phone, matter_id, branch_id, consultation_code, items, subtotal, tax_amount, total_amount, date, due_date, payment_status, approval_status, payment_reference, payment_method, notes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).bind(
+          id, invoiceNumber, body.clientId || null, body.clientName, body.clientEmail, body.clientPhone,
+          body.matterId || null, body.branchId || 'br-abuja-01', body.consultationCode || null,
+          JSON.stringify(body.items || []), body.subtotal || body.totalAmount, body.taxAmount || 0,
+          body.totalAmount, body.date || new Date().toISOString().split('T')[0], body.dueDate,
+          body.paymentStatus || 'UNPAID', body.approvalStatus || 'NONE', paymentReference, body.paymentMethod || null, body.notes || ''
+        ).run();
+
+        const auth = await getAuthUser(request, db);
+        if (auth) {
+          await logAudit(db, auth.user.id, auth.user.name, auth.user.role, 'CREATE_INVOICE', 'Invoice', id, `Generated invoice ${invoiceNumber} for ${body.clientName} (₦${Number(body.totalAmount).toLocaleString()})`);
+        }
+
+        return jsonResponse({ success: true, invoiceNumber, paymentReference, id });
+      }
+    }
+
+    if (path.startsWith('/api/invoices/') && request.method === 'PUT') {
+      const id = path.replace('/api/invoices/', '').trim();
+      const body = await request.json() as any;
+      const auth = await getAuthUser(request, db);
+
+      // Enforce role authorization
+      if (auth && auth.user.role !== 'PRINCIPAL_PARTNER' && auth.user.role !== 'HEAD_OF_CHAMBER' && auth.user.role !== 'ACCOUNT_OFFICER') {
+        return errorResponse('Unauthorized: Only Account Officer, Head of Chamber, or Principal Partner can modify invoices.', 403);
+      }
+
+      await db.prepare(
+        `UPDATE invoices 
+         SET client_name = ?, client_email = ?, client_phone = ?, subtotal = ?, total_amount = ?, 
+             payment_status = ?, approval_status = ?, notes = ?
+         WHERE id = ?`
+      ).bind(
+        body.clientName, body.clientEmail, body.clientPhone, body.subtotal, body.totalAmount,
+        body.paymentStatus, body.approvalStatus || 'NONE', body.notes || '', id
+      ).run();
+
+      if (auth) {
+        await logAudit(db, auth.user.id, auth.user.name, auth.user.role, 'UPDATE_INVOICE', 'Invoice', id, `Updated invoice for ${body.clientName}`);
+      }
+      return jsonResponse({ success: true });
+    }
+
+    if (path === '/api/payments') {
+      if (request.method === 'GET') {
+        const rows = await db.prepare('SELECT * FROM payments ORDER BY submitted_at DESC').all<any>();
+        return jsonResponse({ success: true, payments: rows.results || [] });
+      }
+
+      // Submit payment
+      if (request.method === 'POST') {
+        const body = await request.json() as any;
+        const id = body.id || `pay-${Date.now()}`;
+        const submittedAt = new Date().toISOString();
+
+        await db.prepare(
+          `INSERT INTO payments 
+           (id, payment_reference, invoice_number, client_name, amount, branch_id, payment_method, payment_date, status, bank_transaction_ref, proof_document_url, submitted_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PAYMENT_SUBMITTED', ?, ?, ?)`
+        ).bind(
+          id, body.paymentReference, body.invoiceNumber, body.clientName, body.amount,
+          body.branchId || 'br-abuja-01', body.paymentMethod || 'Bank Transfer',
+          body.paymentDate || submittedAt.split('T')[0], body.bankTransactionRef || null,
+          body.proofDocumentUrl || null, submittedAt
+        ).run();
+
+        // Update invoice payment_status
+        await db.prepare(
+          "UPDATE invoices SET payment_status = 'PAYMENT_SUBMITTED' WHERE invoice_number = ? OR payment_reference = ?"
+        ).bind(body.invoiceNumber, body.paymentReference).run();
+
+        // Update consultation status if matching
+        await db.prepare(
+          "UPDATE consultations SET status = 'Payment Verification Pending', client_visible_update = 'Payment submitted. Awaiting verification by Account Officer.' WHERE invoice_number = ? OR payment_reference = ?"
+        ).bind(body.invoiceNumber, body.paymentReference).run();
+
+        return jsonResponse({ success: true, paymentId: id });
+      }
+    }
+
+    // Role-authorized payment verification
+    if (path === '/api/payments/verify' && request.method === 'PUT') {
+      const auth = await getAuthUser(request, db);
+      if (!auth) return errorResponse('Unauthorized: Valid personnel login required.', 401);
+
+      // Role check: Only Account Officer, Administrator, or Principal Partner
+      if (auth.user.role !== 'ACCOUNT_OFFICER' && auth.user.role !== 'ADMINISTRATOR_SECRETARY' && auth.user.role !== 'PRINCIPAL_PARTNER') {
+        return errorResponse('Forbidden: Only Account Officer or Chambers Administration can verify payments.', 403);
+      }
+
+      const body = await request.json() as any;
+      const { paymentId, isApproved, notes } = body;
+
+      const receiptNumber = isApproved ? await getNextNumber(db, 'receipt', 'REC') : null;
+      const newStatus = isApproved ? 'PAYMENT_VERIFIED' : 'REJECTED';
+
+      await db.prepare(
+        `UPDATE payments 
+         SET status = ?, receipt_number = ?, verified_by_id = ?, verified_by_name = ?, 
+             verification_date = datetime('now'), verification_notes = ?
+         WHERE id = ?`
+      ).bind(newStatus, receiptNumber, auth.user.id, auth.user.name, notes || '', paymentId).run();
+
+      const payment = await db.prepare('SELECT * FROM payments WHERE id = ?').bind(paymentId).first<any>();
+      if (payment) {
+        // Update invoice
+        await db.prepare(
+          `UPDATE invoices SET payment_status = ? WHERE invoice_number = ?`
+        ).bind(isApproved ? 'PAYMENT_VERIFIED' : 'UNPAID', payment.invoice_number).run();
+
+        // Update consultation
+        await db.prepare(
+          `UPDATE consultations 
+           SET status = ?, client_visible_update = ?
+           WHERE invoice_number = ? OR payment_reference = ?`
+        ).bind(
+          isApproved ? 'Payment Verified' : 'Awaiting Payment',
+          isApproved ? `Payment verified by Accounts. Receipt ${receiptNumber} issued. Schedule confirmed.` : `Payment could not be verified: ${notes}`,
+          payment.invoice_number, payment.payment_reference
+        ).run();
+
+        await logAudit(db, auth.user.id, auth.user.name, auth.user.role, 'VERIFY_PAYMENT', 'Payment', paymentId, `${isApproved ? 'Verified' : 'Rejected'} payment of ₦${Number(payment.amount).toLocaleString()} for ${payment.client_name}`);
+      }
+
+      return jsonResponse({ success: true, receiptNumber, status: newStatus });
+    }
+
+    // --------------------------------------------------------------------------
+    // 6. MATTERS, CASES & ASSIGNMENTS
+    // --------------------------------------------------------------------------
+    if (path === '/api/matters') {
+      if (request.method === 'GET') {
+        const rows = await db.prepare('SELECT * FROM matters ORDER BY created_at DESC').all<any>();
+        return jsonResponse({ success: true, matters: rows.results || [] });
+      }
+
+      if (request.method === 'POST') {
+        const body = await request.json() as any;
+        const matterId = body.matterId || await getNextNumber(db, 'matter', 'MAT');
+        const id = body.id || `mat-${Date.now()}`;
+
+        await db.prepare(
+          `INSERT INTO matters 
+           (id, matter_id, title, client_id, branch_id, lead_counsel_id, category, status, stage, engagement_date, client_visible_update, privileged_internal_notes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).bind(
+          id, matterId, body.title, body.clientId, body.branchId || 'br-abuja-01', body.leadCounselId,
+          body.category || 'General Litigation', body.status || 'Active', body.stage || 'Pleadings Preparation',
+          body.engagementDate || new Date().toISOString().split('T')[0], body.clientVisibleUpdate || '', body.privilegedInternalNotes || ''
+        ).run();
+
+        const auth = await getAuthUser(request, db);
+        if (auth) {
+          await logAudit(db, auth.user.id, auth.user.name, auth.user.role, 'CREATE_MATTER', 'Matter', id, `Opened matter: ${body.title} (${matterId})`);
+        }
+        return jsonResponse({ success: true, matterId, id });
+      }
+    }
+
+    if (path === '/api/cases') {
+      if (request.method === 'GET') {
+        const rows = await db.prepare('SELECT * FROM cases ORDER BY created_at DESC').all<any>();
+        return jsonResponse({ success: true, cases: rows.results || [] });
+      }
+
+      if (request.method === 'POST') {
+        const body = await request.json() as any;
+        const caseId = body.caseId || await getNextNumber(db, 'case', 'CASE');
+        const id = body.id || `case-${Date.now()}`;
+
+        await db.prepare(
+          `INSERT INTO cases 
+           (id, case_id, suit_number, matter_id, client_id, branch_id, court_id, judicial_division, judge, counsel_id, opposing_party, opposing_counsel, case_type, subject_matter, filing_date, next_court_date, status, client_visible_update, internal_strategy_notes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).bind(
+          id, caseId, body.suitNumber, body.matterId, body.clientId, body.branchId || 'br-abuja-01',
+          body.courtId || 'crt-01', body.judicialDivision || 'Abuja', body.judge || null,
+          body.counselId, body.opposingParty, body.opposingCounsel || null, body.caseType || 'Civil',
+          body.subjectMatter || '', body.filingDate || new Date().toISOString().split('T')[0],
+          body.nextCourtDate || null, body.status || 'Hearing', body.clientVisibleUpdate || '', body.internalStrategyNotes || ''
+        ).run();
+
+        // Create assignment record
+        const asgnId = `asgn-${Date.now()}`;
+        const auth = await getAuthUser(request, db);
+        await db.prepare(
+          `INSERT INTO case_assignments (id, case_id, suit_number, branch_id, counsel_id, assigned_by_id, assigned_by_name, date_assigned, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), 'PENDING')`
+        ).bind(
+          asgnId, id, body.suitNumber, body.branchId || 'br-abuja-01', body.counselId,
+          auth?.user.id || 'usr-principal-01', auth?.user.name || 'Principal Partner'
+        ).run();
+
+        if (auth) {
+          await logAudit(db, auth.user.id, auth.user.name, auth.user.role, 'FILE_CASE', 'Case', id, `Registered case ${body.suitNumber} (${caseId})`);
+        }
+        return jsonResponse({ success: true, caseId, id });
+      }
+    }
+
+    if (path.startsWith('/api/case-assignments/') && request.method === 'PUT') {
+      const id = path.replace('/api/case-assignments/', '').trim();
+      const body = await request.json() as any;
+      const { status, reason, notes } = body;
+
+      await db.prepare(
+        `UPDATE case_assignments 
+         SET status = ?, rejection_reason = ?, rejection_notes = ?, response_date = datetime('now')
+         WHERE id = ?`
+      ).bind(status, reason || null, notes || null, id).run();
+
+      const auth = await getAuthUser(request, db);
+      if (auth) {
+        await logAudit(db, auth.user.id, auth.user.name, auth.user.role, `ASSIGNMENT_${status}`, 'CaseAssignment', id, `Counsel responded with ${status}`);
+      }
+      return jsonResponse({ success: true });
+    }
+
+    // --------------------------------------------------------------------------
+    // 7. COURT DIARY & TASKS
+    // --------------------------------------------------------------------------
+    if (path === '/api/court-diary') {
+      if (request.method === 'GET') {
+        const rows = await db.prepare('SELECT * FROM court_diary ORDER BY court_date ASC').all<any>();
+        return jsonResponse({ success: true, diary: rows.results || [] });
+      }
+
+      if (request.method === 'POST') {
+        const body = await request.json() as any;
+        const id = body.id || `diary-${Date.now()}`;
+
+        await db.prepare(
+          `INSERT INTO court_diary 
+           (id, case_id, suit_number, branch_id, court_date, court_time, court_name, counsel_id, client_id, purpose, status, notes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Scheduled', ?)`
+        ).bind(
+          id, body.caseId, body.suitNumber, body.branchId || 'br-abuja-01', body.courtDate,
+          body.courtTime || null, body.courtName, body.counselId, body.clientId, body.purpose, body.notes || ''
+        ).run();
+
+        // Update case nextCourtDate
+        await db.prepare('UPDATE cases SET next_court_date = ? WHERE id = ?').bind(body.courtDate, body.caseId).run();
+
+        return jsonResponse({ success: true, id });
+      }
+    }
+
+    if (path === '/api/tasks') {
+      if (request.method === 'GET') {
+        const rows = await db.prepare('SELECT * FROM tasks ORDER BY due_date ASC').all<any>();
+        return jsonResponse({ success: true, tasks: rows.results || [] });
+      }
+
+      if (request.method === 'POST') {
+        const body = await request.json() as any;
+        const id = body.id || `task-${Date.now()}`;
+        const auth = await getAuthUser(request, db);
+
+        await db.prepare(
+          `INSERT INTO tasks (id, title, assigned_to_id, assigned_by_id, branch_id, matter_id, case_id, priority, due_date, status, notes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending', ?)`
+        ).bind(
+          id, body.title, body.assignedToId, auth?.user.id || 'usr-principal-01',
+          body.branchId || 'br-abuja-01', body.matterId || null, body.caseId || null,
+          body.priority || 'Medium', body.dueDate, body.notes || ''
+        ).run();
+
+        return jsonResponse({ success: true, id });
+      }
+    }
+
+    // --------------------------------------------------------------------------
+    // 8. PROPERTIES, LANDLORDS, UNITS, TENANTS & QUIT NOTICES
+    // --------------------------------------------------------------------------
+    if (path === '/api/properties') {
+      if (request.method === 'GET') {
+        const rows = await db.prepare('SELECT * FROM properties ORDER BY created_at DESC').all<any>();
+        return jsonResponse({ success: true, properties: rows.results || [] });
+      }
+
+      if (request.method === 'POST') {
+        const body = await request.json() as any;
+        const propertyId = body.propertyId || await getNextNumber(db, 'property', 'PROP');
+        const id = body.id || `prop-${Date.now()}`;
+
+        await db.prepare(
+          `INSERT INTO properties 
+           (id, property_id, branch_id, name, property_type, address, state, lga, district, landlord_id, total_units, title_information, survey_information, legal_status, assigned_lawyer_id, related_client_id, notes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).bind(
+          id, propertyId, body.branchId || 'br-abuja-01', body.name, body.propertyType || 'Commercial Building',
+          body.address, body.state || 'FCT', body.lga || 'AMAC', body.district || 'CBD', body.landlordId,
+          body.totalUnits || 1, body.titleInformation || '', body.surveyInformation || '',
+          body.legalStatus || 'Managed by Chambers', body.assignedLawyerId || 'usr-counsel-01',
+          body.relatedClientId || null, body.notes || ''
+        ).run();
+
+        const auth = await getAuthUser(request, db);
+        if (auth) {
+          await logAudit(db, auth.user.id, auth.user.name, auth.user.role, 'ADD_PROPERTY', 'Property', id, `Registered property: ${body.name} (${propertyId})`);
+        }
+        return jsonResponse({ success: true, propertyId, id });
+      }
+    }
+
+    if (path === '/api/landlords') {
+      if (request.method === 'GET') {
+        const rows = await db.prepare('SELECT * FROM landlords ORDER BY date_registered DESC').all<any>();
+        return jsonResponse({ success: true, landlords: rows.results || [] });
+      }
+
+      if (request.method === 'POST') {
+        const body = await request.json() as any;
+        const trackingCode = await getNextNumber(db, 'landlord', 'LAND');
+        const count = await db.prepare('SELECT COUNT(*) as c FROM landlords').first<{ c: number }>();
+        const landlordId = `LND-${String((count?.c || 0) + 1).padStart(4, '0')}`;
+        const id = body.id || `lnd-${Date.now()}`;
+
+        await db.prepare(
+          `INSERT INTO landlords (id, landlord_id, full_name, phone, email, address, bank_details, tracking_code, date_registered)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
+        ).bind(
+          id, landlordId, body.fullName, body.phone, body.email, body.address,
+          body.bankDetails || '', trackingCode
+        ).run();
+
+        return jsonResponse({ success: true, landlordId, trackingCode, id });
+      }
+    }
+
+    if (path === '/api/tenants') {
+      if (request.method === 'GET') {
+        const rows = await db.prepare('SELECT * FROM tenants ORDER BY date_registered DESC').all<any>();
+        return jsonResponse({ success: true, tenants: rows.results || [] });
+      }
+
+      if (request.method === 'POST') {
+        const body = await request.json() as any;
+        const trackingCode = await getNextNumber(db, 'tenancy', 'TEN');
+        const count = await db.prepare('SELECT COUNT(*) as c FROM tenants').first<{ c: number }>();
+        const tenantId = `TNT-${String((count?.c || 0) + 1).padStart(4, '0')}`;
+        const id = body.id || `tnt-${Date.now()}`;
+
+        await db.prepare(
+          `INSERT INTO tenants (id, tenant_id, full_name, phone, email, landlord_id, property_id, unit_number, tracking_code, occupation, status, date_registered)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Active', datetime('now'))`
+        ).bind(
+          id, tenantId, body.fullName, body.phone, body.email, body.landlordId,
+          body.propertyId, body.unitNumber, trackingCode, body.occupation || ''
+        ).run();
+
+        return jsonResponse({ success: true, tenantId, trackingCode, id });
+      }
+    }
+
+    if (path === '/api/quit-notices') {
+      if (request.method === 'GET') {
+        const rows = await db.prepare('SELECT * FROM quit_notices ORDER BY created_at DESC').all<any>();
+        return jsonResponse({ success: true, quitNotices: rows.results || [] });
+      }
+
+      if (request.method === 'POST') {
+        const body = await request.json() as any;
+        const quitNoticeId = await getNextNumber(db, 'quit_notice', 'QUIT');
+        const id = body.id || `qn-${Date.now()}`;
+        const auth = await getAuthUser(request, db);
+
+        await db.prepare(
+          `INSERT INTO quit_notices 
+           (id, quit_notice_id, tenant_id, tenant_name, property_id, property_name, landlord_id, landlord_name, unit_number, notice_type, notice_date, notice_expiry_date, reason, statutory_basis, status, issued_by_id, issued_by_name)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Issued', ?, ?)`
+        ).bind(
+          id, quitNoticeId, body.tenantId, body.tenantName, body.propertyId, body.propertyName,
+          body.landlordId, body.landlordName, body.unitNumber, body.noticeType, body.noticeDate,
+          body.noticeExpiryDate, body.reason, body.statutoryBasis,
+          auth?.user.id || 'usr-principal-01', auth?.user.name || 'Principal Partner'
+        ).run();
+
+        return jsonResponse({ success: true, quitNoticeId, id });
+      }
+    }
+
+    // --------------------------------------------------------------------------
+    // 9. PUBLIC CONSULTATION BOOKING
+    // --------------------------------------------------------------------------
+    if (path === '/api/consultations') {
+      if (request.method === 'GET') {
+        const rows = await db.prepare('SELECT * FROM consultations ORDER BY created_at DESC').all<any>();
+        return jsonResponse({ success: true, consultations: rows.results || [] });
+      }
+
+      if (request.method === 'POST') {
+        const body = await request.json() as any;
+        const code = await getNextNumber(db, 'consultation', 'CONS');
+        const invoiceNumber = await getNextNumber(db, 'invoice', 'INV');
+        const paymentRef = await getNextNumber(db, 'payment', 'PAY');
+        const id = `cons-${Date.now()}`;
+        const invId = `inv-${Date.now()}`;
+        const fee = body.feeAmount || 35000;
+
+        // Insert consultation
+        await db.prepare(
+          `INSERT INTO consultations 
+           (id, code, service_category, preferred_date, preferred_time, full_name, phone, email, method, brief_enquiry, supporting_documents, status, invoice_number, payment_reference, branch_id, client_visible_update)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Awaiting Payment', ?, ?, ?, ?)`
+        ).bind(
+          id, code, body.serviceCategory, body.preferredDate, body.preferredTime, body.fullName,
+          body.phone, body.email, body.method, body.briefEnquiry, JSON.stringify(body.supportingDocuments || []),
+          invoiceNumber, paymentRef, body.branchId || 'br-abuja-01',
+          'Consultation request received. Invoice generated. Awaiting payment submission.'
+        ).run();
+
+        // Insert associated invoice
+        await db.prepare(
+          `INSERT INTO invoices 
+           (id, invoice_number, client_name, client_email, client_phone, consultation_code, items, subtotal, tax_amount, total_amount, date, due_date, payment_status, payment_reference, notes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 'UNPAID', ?, ?)`
+        ).bind(
+          invId, invoiceNumber, body.fullName, body.email, body.phone, code,
+          JSON.stringify([{ description: `Legal Consultation Fee (${body.serviceCategory}) — ${body.method}`, amount: fee }]),
+          fee, fee, new Date().toISOString().split('T')[0], body.preferredDate, paymentRef,
+          `Consultation Reference: ${code}. Quote payment reference ${paymentRef} upon transfer.`
+        ).run();
+
+        return jsonResponse({
+          success: true,
+          consultation: { id, code, fullName: body.fullName, status: 'Awaiting Payment' },
+          invoiceNumber,
+          paymentReference: paymentRef
+        });
+      }
+    }
+
+    // --------------------------------------------------------------------------
+    // 10. PUBLIC TRACKING (SANITIZED & SAFE)
+    // --------------------------------------------------------------------------
+    if (path === '/api/tracking' && request.method === 'GET') {
+      const code = (url.searchParams.get('code') || '').trim();
+      if (!code) {
+        return errorResponse('Tracking reference code is required.', 400);
+      }
+
+      // Check client ID
+      const client = await db.prepare(
+        'SELECT client_id, full_name, branch_id, date_registered, conflict_check_status FROM clients WHERE client_id = ?'
+      ).bind(code).first<any>();
+      if (client) {
+        return jsonResponse({
+          success: true,
+          type: 'Client Matter Dossier',
+          data: {
+            reference: client.client_id,
+            name: client.full_name,
+            registeredDate: client.date_registered,
+            status: 'Verified Chambers Client'
+          }
+        });
+      }
+
+      // Check tenant tracking code
+      const tenant = await db.prepare(
+        `SELECT t.tracking_code, t.full_name, t.unit_number, t.status, p.name as property_name
+         FROM tenants t
+         LEFT JOIN properties p ON t.property_id = p.id
+         WHERE t.tracking_code = ?`
+      ).bind(code).first<any>();
+      if (tenant) {
+        return jsonResponse({
+          success: true,
+          type: 'Tenancy Registry Record',
+          data: {
+            reference: tenant.tracking_code,
+            tenant: tenant.full_name,
+            property: tenant.property_name,
+            unit: tenant.unit_number,
+            status: tenant.status
+          }
+        });
+      }
+
+      // Check landlord tracking code
+      const landlord = await db.prepare(
+        'SELECT tracking_code, full_name, landlord_id, date_registered FROM landlords WHERE tracking_code = ?'
+      ).bind(code).first<any>();
+      if (landlord) {
+        return jsonResponse({
+          success: true,
+          type: 'Estate / Landlord Portfolio',
+          data: {
+            reference: landlord.tracking_code,
+            name: landlord.full_name,
+            status: 'Managed by Chambers'
+          }
+        });
+      }
+
+      // Check consultation code
+      const consultation = await db.prepare(
+        'SELECT code, service_category, preferred_date, method, status, client_visible_update FROM consultations WHERE code = ?'
+      ).bind(code).first<any>();
+      if (consultation) {
+        return jsonResponse({
+          success: true,
+          type: 'Client Consultation Fixture',
+          data: {
+            reference: consultation.code,
+            category: consultation.service_category,
+            scheduledDate: consultation.preferred_date,
+            method: consultation.method,
+            status: consultation.status,
+            update: consultation.client_visible_update
+          }
+        });
+      }
+
+      // Check invoice number or payment ref
+      const invoice = await db.prepare(
+        'SELECT invoice_number, total_amount, payment_status, due_date FROM invoices WHERE invoice_number = ? OR payment_reference = ?'
+      ).bind(code, code).first<any>();
+      if (invoice) {
+        return jsonResponse({
+          success: true,
+          type: 'Fee Note & Payment Verification',
+          data: {
+            invoiceNumber: invoice.invoice_number,
+            amount: invoice.total_amount,
+            status: invoice.payment_status,
+            dueDate: invoice.due_date
+          }
+        });
+      }
+
+      return errorResponse('No official record matches the supplied tracking code. Please verify and retry.', 404);
+    }
+
+    // --------------------------------------------------------------------------
+    // 11. WEBSITE CMS & CONTENT
+    // --------------------------------------------------------------------------
+    if (path === '/api/website-content') {
+      if (request.method === 'GET') {
+        const row = await db.prepare("SELECT * FROM website_content WHERE id = 'cms-main'").first<any>();
+        return jsonResponse({ success: true, content: row });
+      }
+
+      if (request.method === 'PUT') {
+        const auth = await getAuthUser(request, db);
+        if (!auth || (auth.user.role !== 'PRINCIPAL_PARTNER' && auth.user.role !== 'HEAD_OF_CHAMBER' && auth.user.role !== 'ADMINISTRATOR_SECRETARY')) {
+          return errorResponse('Unauthorized to update Chambers website content', 403);
+        }
+
+        const body = await request.json() as any;
+        await db.prepare(
+          `UPDATE website_content 
+           SET tagline = ?, hero_headline = ?, hero_subheadline = ?, about_story = ?, about_founding_year = ?,
+               office_hours_text = ?, emergency_hotline = ?, consultation_fee_standard = ?, 
+               internship_policy_notice = ?, recovery_of_premises_notice = ?, invoice_bank_name = ?, 
+               invoice_account_name = ?, invoice_account_number = ?, invoice_payment_method = ?,
+               last_updated = datetime('now'), updated_by = ?
+           WHERE id = 'cms-main'`
+        ).bind(
+          body.tagline, body.heroHeadline, body.heroSubheadline, body.aboutStory, body.aboutFoundingYear,
+          body.officeHoursText, body.emergencyHotline, body.consultationFeeStandard,
+          body.internshipPolicyNotice, body.recoveryOfPremisesNotice, body.invoiceBankName,
+          body.invoiceAccountName, body.invoiceAccountNumber, body.invoicePaymentMethod,
+          auth.user.name
+        ).run();
+
+        await logAudit(db, auth.user.id, auth.user.name, auth.user.role, 'UPDATE_WEBSITE_CONTENT', 'WebsiteContent', 'cms-main', 'Updated Chambers website content');
+        return jsonResponse({ success: true });
+      }
+    }
+
+    // --------------------------------------------------------------------------
+    // 12. D1 SQL QUERY (RESTRICTED TO PRINCIPAL PARTNER)
+    // --------------------------------------------------------------------------
+    if (path === '/api/d1/query' && request.method === 'POST') {
+      const auth = await getAuthUser(request, db);
+      if (!auth || auth.user.role !== 'PRINCIPAL_PARTNER') {
+        return errorResponse('Forbidden: Cloudflare D1 query console requires authenticated Principal Partner session.', 403);
+      }
+
+      const body = await request.json() as any;
+      const sql = (body.sql || '').trim();
+      const params = body.params || [];
+
+      if (!sql) return errorResponse('SQL statement cannot be empty.');
+
+      const statement = db.prepare(sql);
+      const bound = params.length > 0 ? statement.bind(...params) : statement;
+      const result = await bound.all();
+
+      return jsonResponse({
+        success: true,
+        results: result.results || [],
+        meta: result.meta
+      });
+    }
+
+    return errorResponse(`Endpoint "${path}" not found.`, 404);
+
   } catch (err: any) {
-    console.error(`API Error on ${method} ${path}:`, err);
-    return errorResponse(`Server error: ${err.message || 'Unknown database error'}`, 500);
+    console.error('API Error:', err);
+    return errorResponse(err.message || 'Internal server error processing D1 request.', 500);
   }
 }
