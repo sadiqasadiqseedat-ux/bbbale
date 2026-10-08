@@ -851,9 +851,16 @@ export const UserManagementView: React.FC = () => {
                           if (!file) return;
                           const reader = new FileReader();
                           reader.onload = () => {
-                            setCreateForm({ ...createForm, photoUrl: reader.result as string });
-                          };
-                          reader.readAsDataURL(file);
+  const imageData = reader.result as string;
+
+  if (imageData && imageData.startsWith('data:image/')) {
+    setCreateForm(prev => ({
+      ...prev,
+      photoUrl: imageData
+    }));
+  }
+};
+reader.readAsDataURL(file);
                         }}
                         className="w-full text-xs file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-amber-100 file:text-amber-800 file:font-semibold file:cursor-pointer"
                       />
