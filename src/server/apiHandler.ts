@@ -176,6 +176,7 @@ async function ensureBootstrap(db: D1Database): Promise<void> {
         title: 'Senior Advocate of Nigeria / Principal Partner',
         practiceAreas: JSON.stringify(['Constitutional Litigation', 'Appellate Advocacy', 'Energy & Natural Resources', 'Commercial Arbitration']),
         bio: 'Founding Partner and Senior Advocate of Nigeria with over three decades of exceptional legal practice.',
+        photoUrl: 'https://images.unsplash.com/photo-1556157382-97eda2d62296?auto=format&fit=crop&q=80&w=600',
         salt: 'a1b2c3d4e5f60718'
       },
       {
@@ -189,6 +190,7 @@ async function ensureBootstrap(db: D1Database): Promise<void> {
         title: 'Partner / Head of Chamber (Abuja)',
         practiceAreas: JSON.stringify(['Corporate & Commercial', 'Property & Real Estate Law', 'Islamic Jurisprudence']),
         bio: 'Partner directing the day-to-day legal operations of the Abuja Head Chambers.',
+        photoUrl: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&q=80&w=600',
         salt: 'b2c3d4e5f6071829'
       },
       {
@@ -202,6 +204,7 @@ async function ensureBootstrap(db: D1Database): Promise<void> {
         title: 'Chambers Administrator & Legal Secretary',
         practiceAreas: JSON.stringify(['Court Filings & Cause Lists', 'Client Intake', 'Legal Drafting Management']),
         bio: 'Oversees chambers intake and secretarial administration.',
+        photoUrl: 'https://images.unsplash.com/photo-1580894732454-defa48f40742?auto=format&fit=crop&q=80&w=600',
         salt: 'c3d4e5f60718293a'
       },
       {
@@ -215,6 +218,7 @@ async function ensureBootstrap(db: D1Database): Promise<void> {
         title: 'Principal Financial Accountant',
         practiceAreas: JSON.stringify(['Client Escrow Management', 'Retainer Accounting', 'Tax & Compliance']),
         bio: 'Directs billing, fee notes, and financial accounting.',
+        photoUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=600',
         salt: 'd4e5f60718293a4b'
       },
       {
@@ -228,6 +232,7 @@ async function ensureBootstrap(db: D1Database): Promise<void> {
         title: 'Senior Litigation & Property Associate',
         practiceAreas: JSON.stringify(['Recovery of Premises', 'High Court Litigation', 'Tenancy Disputes']),
         bio: 'Accomplished trial advocate specializing in tenancy litigation.',
+        photoUrl: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&q=80&w=600',
         salt: 'e5f60718293a4b5c'
       }
     ];
@@ -240,7 +245,7 @@ async function ensureBootstrap(db: D1Database): Promise<void> {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, 'Active', ?, ?, 1)`
       ).bind(
         u.id, u.username, u.name, u.email, u.phone, u.role, u.branchId, u.title,
-        u.practiceAreas, u.bio, '', 'AVAILABLE', hash, u.salt
+        u.practiceAreas, u.bio, u.photoUrl || '', 'AVAILABLE', hash, u.salt
       ).run();
     }
 
@@ -538,7 +543,20 @@ export async function handleApiRequest(
       const expenses = await db.prepare('SELECT * FROM expenses ORDER BY created_at DESC').all<any>().catch(() => ({ results: [] }));
       const students = await db.prepare('SELECT * FROM students ORDER BY created_at DESC').all<any>();
       const documents = await db.prepare('SELECT * FROM documents ORDER BY upload_date DESC').all<any>();
-      const correspondence = await db.prepare('SELECT * FROM correspondence ORDER BY created_at DESC').all<any>().catch(() => ({ results: [] }));
+      let correspondence: any = { results: [] };
+      try {
+        correspondence = await db.prepare('SELECT * FROM correspondence ORDER BY created_at DESC').all<any>();
+      } catch {
+        try {
+          correspondence = await db.prepare('SELECT * FROM correspondence ORDER BY date DESC').all<any>();
+        } catch {
+          try {
+            correspondence = await db.prepare('SELECT * FROM correspondence').all<any>();
+          } catch {
+            correspondence = { results: [] };
+          }
+        }
+      }
       const legalResearch = await db.prepare('SELECT * FROM legal_research ORDER BY date DESC').all<any>();
       const appointments = await db.prepare('SELECT * FROM appointments ORDER BY date ASC').all<any>().catch(() => ({ results: [] }));
       const publicNotices = await db.prepare('SELECT * FROM public_notices ORDER BY publish_date DESC').all<any>();
@@ -554,6 +572,8 @@ export async function handleApiRequest(
           users: (users.results || []).map(u => ({
             ...u,
             branchId: u.branch_id,
+            photoUrl: u.photo_url || '',
+            accountStatus: u.account_status || 'Active',
             practiceAreas: typeof u.practice_areas === 'string' ? JSON.parse(u.practice_areas || '[]') : [],
             isPubliclyVisible: Boolean(u.is_publicly_visible),
             isActive: Boolean(u.is_active),
@@ -1011,11 +1031,11 @@ export async function handleApiRequest(
         body.title || '',
         JSON.stringify(body.practiceAreas || []),
         body.bio || '',
-        body.photoUrl || '',
+        body.photoUrl !== undefined ? body.photoUrl : (body.photo_url || ''),
         body.availability || 'AVAILABLE',
         body.isPubliclyVisible === false ? 0 : 1,
-        body.isActive === false ? 0 : 1,
-        body.accountStatus || 'Active',
+        body.isActive !== undefined ? (body.isActive ? 1 : 0) : ((body.accountStatus || body.account_status) === 'Active' ? 1 : 0),
+        body.accountStatus || body.account_status || 'Active',
         body.requiresPasswordChange === false ? 0 : 1,
         id
       ).run();
@@ -1032,6 +1052,142 @@ export async function handleApiRequest(
       );
 
       return jsonResponse({ success: true });
+    }
+
+    if (path.startsWith('/api/users/') && path.endsWith('/status') && (request.method === 'PATCH' || request.method === 'PUT')) {
+      const auth = await getAuthUser(request, db);
+
+      if (!auth) {
+        return errorResponse('Unauthorized: Valid personnel login required.', 401);
+      }
+
+      if (
+        auth.user.role !== 'PRINCIPAL_PARTNER' &&
+        auth.user.role !== 'HEAD_OF_CHAMBER'
+      ) {
+        return errorResponse(
+          'Unauthorized: Only Principal Partner or Head of Chamber can alter account status.',
+          403
+        );
+      }
+
+      const id = path.replace('/api/users/', '').replace('/status', '').trim();
+      const body = await request.json() as any;
+      const targetStatus = body.status || body.accountStatus;
+
+      if (!targetStatus) {
+        return errorResponse('Account status is required (e.g. Active, Suspended).', 400);
+      }
+
+      const existing = await db.prepare(
+        'SELECT id, username, name, role FROM users WHERE id = ?'
+      ).bind(id).first<any>();
+
+      if (!existing) {
+        return errorResponse('User not found.', 404);
+      }
+
+      if (existing.role === 'PRINCIPAL_PARTNER' && targetStatus !== 'Active') {
+        return errorResponse('Forbidden: The Principal Partner account cannot be suspended or deactivated.', 403);
+      }
+
+      if (auth.user.role === 'HEAD_OF_CHAMBER' && existing.role === 'PRINCIPAL_PARTNER') {
+        return errorResponse('Forbidden: Head of Chamber cannot modify Principal Partner account status.', 403);
+      }
+
+      const isActive = targetStatus === 'Active' ? 1 : 0;
+
+      await db.prepare(
+        'UPDATE users SET account_status = ?, is_active = ? WHERE id = ?'
+      ).bind(targetStatus, isActive, id).run();
+
+      await logAudit(
+        db,
+        auth.user.id,
+        auth.user.name,
+        auth.user.role,
+        'UPDATE_USER_STATUS',
+        'User',
+        id,
+        `Updated user account status for ${existing.name} to "${targetStatus}"`
+      );
+
+      return jsonResponse({ success: true, status: targetStatus, isActive: Boolean(isActive) });
+    }
+
+    if (path.startsWith('/api/users/') && request.method === 'DELETE') {
+      const auth = await getAuthUser(request, db);
+
+      if (!auth) {
+        return errorResponse('Unauthorized: Valid personnel login required.', 401);
+      }
+
+      if (
+        auth.user.role !== 'PRINCIPAL_PARTNER' &&
+        auth.user.role !== 'HEAD_OF_CHAMBER'
+      ) {
+        return errorResponse(
+          'Unauthorized: Only Principal Partner or Head of Chamber can permanently delete user accounts.',
+          403
+        );
+      }
+
+      const id = path.replace('/api/users/', '').trim();
+
+      if (!id) {
+        return errorResponse('User ID is required.', 400);
+      }
+
+      const existing = await db.prepare(
+        'SELECT id, username, name, role FROM users WHERE id = ?'
+      ).bind(id).first<any>();
+
+      if (!existing) {
+        return errorResponse('User not found.', 404);
+      }
+
+      if (existing.role === 'PRINCIPAL_PARTNER') {
+        return errorResponse(
+          'Forbidden: The Principal Partner account is permanently protected and cannot be deleted.',
+          403
+        );
+      }
+
+      if (existing.id === auth.user.id) {
+        return errorResponse(
+          'Forbidden: You cannot delete your own active session account.',
+          400
+        );
+      }
+
+      if (auth.user.role === 'HEAD_OF_CHAMBER' && (existing.role === 'PRINCIPAL_PARTNER' || existing.role === 'HEAD_OF_CHAMBER')) {
+        return errorResponse(
+          'Forbidden: Head of Chamber cannot delete Partner-level accounts.',
+          403
+        );
+      }
+
+      // Clean up sessions
+      await db.prepare('DELETE FROM user_sessions WHERE user_id = ?').bind(id).run().catch(() => {});
+
+      // Delete user completely
+      await db.prepare('DELETE FROM users WHERE id = ?').bind(id).run();
+
+      await logAudit(
+        db,
+        auth.user.id,
+        auth.user.name,
+        auth.user.role,
+        'DELETE_USER',
+        'User',
+        id,
+        `Permanently deleted user account: ${existing.name} (@${existing.username})`
+      );
+
+      return jsonResponse({
+        success: true,
+        message: `User account ${existing.name} has been permanently deleted from Chambers database.`
+      });
     }
 
     // --------------------------------------------------------------------------

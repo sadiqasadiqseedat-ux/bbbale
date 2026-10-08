@@ -26,8 +26,28 @@ export function createDevD1Database(dbFilePath: string = './.base44/chambers_d1_
         .sort();
       for (const file of migrationFiles) {
         const migrationSql = fs.readFileSync(path.join(migrationsDir, file), 'utf-8');
-        sqlite.exec(migrationSql);
+        try {
+          sqlite.exec(migrationSql);
+        } catch (err: any) {
+          // If already applied (e.g. duplicate column or table already exists), continue
+          if (!err.message?.includes('already exists') && !err.message?.includes('duplicate column')) {
+            console.warn(`Migration ${file} execution notice:`, err.message);
+          }
+        }
       }
+    }
+
+    // Ensure correspondence table has created_at column if created from older schema
+    try {
+      const info = sqlite.prepare('PRAGMA table_info(correspondence)').all() as any[];
+      if (info && info.length > 0) {
+        const hasCreatedAt = info.some((col: any) => col.name === 'created_at');
+        if (!hasCreatedAt) {
+          sqlite.exec("ALTER TABLE correspondence ADD COLUMN created_at TEXT NOT NULL DEFAULT (datetime('now'));");
+        }
+      }
+    } catch {
+      // Ignore if table does not exist
     }
 
     return {
@@ -42,7 +62,7 @@ export function createDevD1Database(dbFilePath: string = './.base44/chambers_d1_
             try {
               const stmt = sqlite.prepare(sql);
               const rows = stmt.all(...boundParams);
-              return { success: true, results: rows };
+              return { success: true, results: rows, meta: { served_by: 'dev_sqlite', duration: 0, changes: 0, last_row_id: 0, changed_db: false, size_after: 0, rows_read: rows.length, rows_written: 0 } as any };
             } catch (err: any) {
               console.error(`D1 dev SQL query error [${sql}]:`, err);
               throw err;
@@ -72,6 +92,16 @@ export function createDevD1Database(dbFilePath: string = './.base44/chambers_d1_
               console.error(`D1 dev SQL run error [${sql}]:`, err);
               throw err;
             }
+          },
+          async raw() {
+            try {
+              const stmt = sqlite.prepare(sql);
+              const rows = stmt.all(...boundParams);
+              return rows.map((r: any) => Object.values(r));
+            } catch (err: any) {
+              console.error(`D1 dev SQL raw error [${sql}]:`, err);
+              throw err;
+            }
           }
         };
       },
@@ -85,6 +115,9 @@ export function createDevD1Database(dbFilePath: string = './.base44/chambers_d1_
       async exec(sql: string) {
         sqlite.exec(sql);
         return { count: 1, duration: 0 };
+      },
+      async dump() {
+        return new ArrayBuffer(0);
       }
     };
   } catch (err) {

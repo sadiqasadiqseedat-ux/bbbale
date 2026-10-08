@@ -32,7 +32,7 @@ function devApiMiddlewarePlugin(): Plugin {
               body: isBodyMethod && bodyBuffer.length > 0 ? bodyBuffer : undefined
             });
 
-            const webResponse = await handleApiRequest(webRequest, { DB: devDb });
+            const webResponse = await handleApiRequest(webRequest, { DB: devDb as any });
 
             res.statusCode = webResponse.status;
             webResponse.headers.forEach((value, key) => {

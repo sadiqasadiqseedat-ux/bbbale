@@ -58,7 +58,7 @@ const INITIAL_USERS: User[] = [
     title: 'Senior Advocate of Nigeria / Principal Partner',
     practiceAreas: ['Constitutional Litigation', 'Appellate Advocacy', 'Energy & Natural Resources', 'Commercial Arbitration'],
     bio: 'Founding Partner and Senior Advocate of Nigeria with over three decades of exceptional legal practice.',
-    photoUrl: '',
+    photoUrl: 'https://images.unsplash.com/photo-1556157382-97eda2d62296?auto=format&fit=crop&q=80&w=600',
     availability: 'AVAILABLE',
     isPubliclyVisible: true,
     isActive: true,
@@ -465,8 +465,17 @@ function applyServerData(d: any) {
     setToStorage(STORAGE_KEYS.BRANCHES, d.branches);
   }
   if (Array.isArray(d.users) && d.users.length > 0) {
-    memory.users = d.users;
-    setToStorage(STORAGE_KEYS.USERS, d.users);
+    const normalizedUsers = d.users.map((u: any) => ({
+      ...u,
+      branchId: u.branchId || u.branch_id || 'br-abuja-01',
+      photoUrl: u.photoUrl || u.photo_url || '',
+      accountStatus: u.accountStatus || u.account_status || 'Active',
+      isActive: u.isActive !== undefined ? Boolean(u.isActive) : (u.is_active !== undefined ? Boolean(u.is_active) : ((u.accountStatus || u.account_status) === 'Active')),
+      requiresPasswordChange: u.requiresPasswordChange !== undefined ? Boolean(u.requiresPasswordChange) : Boolean(u.requires_password_change),
+      isPubliclyVisible: u.isPubliclyVisible !== undefined ? Boolean(u.isPubliclyVisible) : Boolean(u.is_publicly_visible)
+    }));
+    memory.users = normalizedUsers;
+    setToStorage(STORAGE_KEYS.USERS, normalizedUsers);
   }
   if (Array.isArray(d.clients)) {
     memory.clients = d.clients;
@@ -1088,19 +1097,76 @@ export const storageService = {
     }
   },
 
-  setUserStatus: (targetUserId: string, newStatus: User['accountStatus'], actor: User): { success: boolean; error?: string } => {
+  setUserStatus: async (targetUserId: string, newStatus: User['accountStatus'], actor: User): Promise<{ success: boolean; error?: string }> => {
+    const target = storageService.getUserById(targetUserId);
+    if (!target) return { success: false, error: 'User not found' };
+    if (target.role === 'PRINCIPAL_PARTNER' && newStatus !== 'Active') {
+      return { success: false, error: 'Protected Account: The Principal Partner account cannot be suspended or deactivated.' };
+    }
+    const updatedUser: User = {
+      ...target,
+      accountStatus: newStatus,
+      isActive: newStatus === 'Active'
+    };
+    memory.users = memory.users.map(u => u.id === targetUserId ? updatedUser : u);
+    setToStorage(STORAGE_KEYS.USERS, memory.users);
+    notifySubscribers();
+
+    try {
+      const response = await apiFetch<{ success: boolean; error?: string }>(`/api/users/${encodeURIComponent(targetUserId)}/status`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status: newStatus, accountStatus: newStatus })
+      });
+
+      if (!response || !response.success) {
+        // Fallback to updating entire user
+        await apiFetch(`/api/users/${encodeURIComponent(targetUserId)}`, {
+          method: 'PUT',
+          body: JSON.stringify(updatedUser)
+        });
+      }
+
+      logAudit(actor, 'SET_USER_STATUS', 'User', targetUserId, `Set status to ${newStatus}`);
+      return { success: true };
+    } catch (err: any) {
+      console.warn('Persisting user status to D1 failed, saved locally:', err);
+      logAudit(actor, 'SET_USER_STATUS', 'User', targetUserId, `Set status to ${newStatus}`);
+      return { success: true };
+    }
+  },
+
+  deleteUserAccount: async (targetUserId: string, actor: User): Promise<{ success: boolean; error?: string }> => {
     const target = storageService.getUserById(targetUserId);
     if (!target) return { success: false, error: 'User not found' };
     if (target.role === 'PRINCIPAL_PARTNER') {
-      return { success: false, error: 'Protected Account: Cannot suspend Principal Partner.' };
+      return { success: false, error: 'Protected Account: The Principal Partner account is permanently protected and cannot be deleted.' };
     }
-    target.accountStatus = newStatus;
-    target.isActive = newStatus === 'Active';
-    memory.users = memory.users.map(u => u.id === targetUserId ? target : u);
-    setToStorage(STORAGE_KEYS.USERS, memory.users);
-    notifySubscribers();
-    logAudit(actor, 'SET_USER_STATUS', 'User', targetUserId, `Set status to ${newStatus}`);
-    return { success: true };
+    if (target.id === actor.id) {
+      return { success: false, error: 'Security constraint: You cannot delete your own active session account.' };
+    }
+
+    try {
+      const response = await apiFetch<{ success: boolean; error?: string }>(`/api/users/${encodeURIComponent(targetUserId)}`, {
+        method: 'DELETE'
+      });
+
+      if (!response || !response.success) {
+        return { success: false, error: response?.error || 'Failed to delete user from Cloudflare D1.' };
+      }
+
+      memory.users = memory.users.filter(u => u.id !== targetUserId);
+      setToStorage(STORAGE_KEYS.USERS, memory.users);
+      notifySubscribers();
+
+      logAudit(actor, 'DELETE_USER', 'User', targetUserId, `Permanently deleted user: ${target.name} (@${target.username})`);
+      return { success: true };
+    } catch (err: any) {
+      console.error('Error deleting user account:', err);
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : 'Failed to delete user account.'
+      };
+    }
   },
 
   updateCounselAvailability: (userId: string, status: User['availability'], actor: User): void => {

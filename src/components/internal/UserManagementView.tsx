@@ -22,7 +22,8 @@ import {
   Briefcase,
   Copy,
   Clock,
-  Filter
+  Filter,
+  Trash2
 } from 'lucide-react';
 import { storageService, subscribeToStore } from '../../services/storage';
 import { useAuth } from '../../context/AuthContext';
@@ -36,6 +37,53 @@ export const UserManagementView: React.FC = () => {
   const isBranchScoped = !isPrincipalPartner;
   const canManage = isPrincipalPartner || isHeadOfChamber || isAdminSecretary;
   const canCreateUsers = isPrincipalPartner || isHeadOfChamber;
+  const canDeleteUsers = isPrincipalPartner || isHeadOfChamber;
+
+  // Helper: Client-side photo compression to lightweight base64 JPEG (~30KB-50KB)
+  const processProfilePhoto = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      if (!file.type.startsWith('image/')) {
+        reject(new Error('Selected file must be an image.'));
+        return;
+      }
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error('Failed to read image file.'));
+      reader.onload = () => {
+        const img = new Image();
+        img.onerror = () => reject(new Error('Failed to parse image.'));
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const maxDimension = 400;
+          let width = img.width;
+          let height = img.height;
+
+          if (width > height) {
+            if (width > maxDimension) {
+              height = Math.round((height * maxDimension) / width);
+              width = maxDimension;
+            }
+          } else {
+            if (height > maxDimension) {
+              width = Math.round((width * maxDimension) / height);
+              height = maxDimension;
+            }
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve(reader.result as string);
+            return;
+          }
+          ctx.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL('image/jpeg', 0.85));
+        };
+        img.src = reader.result as string;
+      };
+      reader.readAsDataURL(file);
+    });
+  };
 
   const [users, setUsers] = useState<User[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -48,6 +96,10 @@ export const UserManagementView: React.FC = () => {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isResetOpen, setIsResetOpen] = useState(false);
+  const [isDeleteOpen, setIsDeleteOpen] = useState(false);
+  const [userToDelete, setUserToDelete] = useState<User | null>(null);
+  const [deleteError, setDeleteError] = useState('');
+  const [isDeleting, setIsDeleting] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [actionNotice, setActionNotice] = useState<{ type: 'error' | 'success'; message: string } | null>(null);
 
@@ -300,15 +352,63 @@ export const UserManagementView: React.FC = () => {
     setTimeout(() => setCopiedSuccess(false), 2500);
   };
 
-  // Quick Status Changes (Activate, Deactivate, Suspend)
-  const handleQuickStatusChange = (u: User, newStatus: AccountStatus) => {
+  // Check if a specific target user can be permanently deleted by current logged-in user
+  const canDeleteTarget = (u: User) => {
+    if (!canDeleteUsers) return false;
+    if (u.role === 'PRINCIPAL_PARTNER') return false;
+    if (u.id === currentUser?.id) return false;
+    if (isHeadOfChamber && u.role === 'HEAD_OF_CHAMBER') return false;
+    return true;
+  };
+
+  // Quick Status Changes (Activate, Suspend)
+  const handleQuickStatusChange = async (u: User, newStatus: AccountStatus) => {
     if (!currentUser) return;
     if (u.role === 'PRINCIPAL_PARTNER') {
       setActionNotice({ type: 'error', message: 'The Principal Partner account is permanently protected and cannot be deactivated or suspended.' });
       return;
     }
-    storageService.setUserStatus(u.id, newStatus, currentUser);
-    setActionNotice({ type: 'success', message: `Account status for ${u.name} updated to "${newStatus}".` });
+    const res = await storageService.setUserStatus(u.id, newStatus, currentUser);
+    if (res.success) {
+      setActionNotice({ type: 'success', message: `Account status for ${u.name} updated to "${newStatus}".` });
+    } else {
+      setActionNotice({ type: 'error', message: res.error || 'Failed to update user status.' });
+    }
+  };
+
+  // Open Delete Confirmation Modal
+  const openDeleteModal = (u: User) => {
+    if (!canDeleteTarget(u)) {
+      setActionNotice({ type: 'error', message: 'Unauthorized: Only the Principal Partner or Head of Chamber can delete user accounts.' });
+      return;
+    }
+    setUserToDelete(u);
+    setDeleteError('');
+    setIsDeleteOpen(true);
+  };
+
+  // Execute Permanent Delete
+  const handleConfirmDelete = async () => {
+    if (!userToDelete || !currentUser) return;
+    setIsDeleting(true);
+    setDeleteError('');
+    try {
+      const res = await storageService.deleteUserAccount(userToDelete.id, currentUser);
+      if (res.success) {
+        setActionNotice({
+          type: 'success',
+          message: `User account for ${userToDelete.name} (@${userToDelete.username}) has been permanently deleted.`
+        });
+        setIsDeleteOpen(false);
+        setUserToDelete(null);
+      } else {
+        setDeleteError(res.error || 'Failed to delete user account.');
+      }
+    } catch (err: any) {
+      setDeleteError(err.message || 'Error occurred while deleting user.');
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   // Quick Availability Change
@@ -651,8 +751,8 @@ export const UserManagementView: React.FC = () => {
                             {u.accountStatus === 'Active' ? (
                               <button
                                 onClick={() => handleQuickStatusChange(u, 'Suspended')}
-                                className="px-2 py-1 bg-red-50 hover:bg-red-100 text-red-700 rounded text-[11px] font-semibold border border-red-200 transition-colors"
-                                title="Suspend user account"
+                                className="px-2 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded text-[11px] font-semibold border border-amber-200 transition-colors"
+                                title="Suspend user account access"
                               >
                                 <UserX className="w-3.5 h-3.5 inline mr-1" />
                                 <span>Suspend</span>
@@ -661,13 +761,25 @@ export const UserManagementView: React.FC = () => {
                               <button
                                 onClick={() => handleQuickStatusChange(u, 'Active')}
                                 className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded text-[11px] font-semibold border border-emerald-200 transition-colors"
-                                title="Activate user account"
+                                title="Activate user account access"
                               >
                                 <UserCheck className="w-3.5 h-3.5 inline mr-1" />
                                 <span>Activate</span>
                               </button>
                             )}
                           </>
+                        )}
+
+                        {/* Complete Account Deletion */}
+                        {canDeleteTarget(u) && (
+                          <button
+                            onClick={() => openDeleteModal(u)}
+                            className="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded text-[11px] font-semibold border border-rose-200 transition-colors"
+                            title="Permanently delete user account from Chambers database"
+                          >
+                            <Trash2 className="w-3.5 h-3.5 inline mr-1" />
+                            <span>Delete</span>
+                          </button>
                         )}
                       </td>
                     </tr>
@@ -865,25 +977,31 @@ export const UserManagementView: React.FC = () => {
                       <input
                         type="file"
                         accept="image/*"
-                        onChange={e => {
+                        onChange={async e => {
                           const file = e.target.files?.[0];
                           if (!file) return;
-                          const reader = new FileReader();
-                          reader.onload = () => {
-  const imageData = reader.result as string;
-
-  if (imageData && imageData.startsWith('data:image/')) {
-    setCreateForm(prev => ({
-      ...prev,
-      photoUrl: imageData
-    }));
-  }
-};
-reader.readAsDataURL(file);
+                          try {
+                            const compressed = await processProfilePhoto(file);
+                            setCreateForm(prev => ({
+                              ...prev,
+                              photoUrl: compressed
+                            }));
+                          } catch (err: any) {
+                            setFormError(err.message || 'Failed to process image');
+                          }
                         }}
                         className="w-full text-xs file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-amber-100 file:text-amber-800 file:font-semibold file:cursor-pointer"
                       />
-                      <p className="text-[10px] text-slate-400 mt-1">Select a photo from your computer or device. No web URLs.</p>
+                      {createForm.photoUrl && (
+                        <button
+                          type="button"
+                          onClick={() => setCreateForm(prev => ({ ...prev, photoUrl: '' }))}
+                          className="mt-1 text-[11px] text-rose-600 hover:text-rose-800 underline font-medium block"
+                        >
+                          Remove photo
+                        </button>
+                      )}
+                      <p className="text-[10px] text-slate-400 mt-1">Select a photo from your computer or device. Automatically optimized for Chambers profile.</p>
                     </div>
                   </div>
                 </div>
@@ -1156,18 +1274,28 @@ reader.readAsDataURL(file);
                       <input
                         type="file"
                         accept="image/*"
-                        onChange={e => {
+                        onChange={async e => {
                           const file = e.target.files?.[0];
                           if (!file) return;
-                          const reader = new FileReader();
-                          reader.onload = () => {
-                            setEditForm({ ...editForm, photoUrl: reader.result as string });
-                          };
-                          reader.readAsDataURL(file);
+                          try {
+                            const compressed = await processProfilePhoto(file);
+                            setEditForm(prev => ({ ...prev, photoUrl: compressed }));
+                          } catch (err: any) {
+                            setFormError(err.message || 'Failed to process image');
+                          }
                         }}
                         className="w-full text-xs file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-amber-100 file:text-amber-800 file:font-semibold file:cursor-pointer"
                       />
-                      <p className="text-[10px] text-slate-400 mt-1">Select a photo from your computer or device. No web URLs.</p>
+                      {editForm.photoUrl && (
+                        <button
+                          type="button"
+                          onClick={() => setEditForm(prev => ({ ...prev, photoUrl: '' }))}
+                          className="mt-1 text-[11px] text-rose-600 hover:text-rose-800 underline font-medium block"
+                        >
+                          Remove photo
+                        </button>
+                      )}
+                      <p className="text-[10px] text-slate-400 mt-1">Select a photo from your computer or device. Automatically optimized for Chambers profile.</p>
                     </div>
                   </div>
                 </div>
@@ -1318,6 +1446,94 @@ reader.readAsDataURL(file);
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* DELETE CONFIRMATION MODAL */}
+      {isDeleteOpen && userToDelete && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 sm:p-7 space-y-5 my-8 border border-rose-200 animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-start justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-full bg-rose-100 text-rose-700 flex items-center justify-center shrink-0">
+                  <Trash2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-serif font-bold text-slate-900">
+                    Delete User Account
+                  </h2>
+                  <p className="text-xs text-rose-600 font-semibold">
+                    Permanent Chambers Database Deletion
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  if (!isDeleting) {
+                    setIsDeleteOpen(false);
+                    setUserToDelete(null);
+                  }
+                }}
+                className="text-slate-400 hover:text-slate-600 p-1"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {deleteError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-rose-700 text-xs flex items-start space-x-2">
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{deleteError}</span>
+              </div>
+            )}
+
+            <div className="space-y-3 text-xs text-slate-600">
+              <p>
+                Are you sure you want to permanently delete the personnel account for:
+              </p>
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-1">
+                <div className="flex items-center space-x-2">
+                  <span className="font-bold text-slate-900 text-sm">{userToDelete.name}</span>
+                </div>
+                <p className="font-mono text-amber-800 text-[11px]">@{userToDelete.username}</p>
+                <p className="text-slate-500 text-[11px]">{userToDelete.title} · {userToDelete.role.replace(/_/g, ' ')}</p>
+                <p className="text-slate-500 text-[11px]">{userToDelete.email}</p>
+              </div>
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-900 text-[11px] space-y-1">
+                <p className="font-bold flex items-center space-x-1">
+                  <AlertTriangle className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                  <span>Permanent Action Warning:</span>
+                </p>
+                <p>
+                  This will completely remove the user record and invalidate all active authentication sessions.
+                  Authorized by {isPrincipalPartner ? 'Principal Partner' : 'Head of Chamber'}.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex justify-end space-x-2 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={() => {
+                  setIsDeleteOpen(false);
+                  setUserToDelete(null);
+                }}
+                className="px-4 py-2 border border-slate-300 rounded-lg font-semibold text-slate-700 hover:bg-slate-50 text-xs disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={handleConfirmDelete}
+                className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-bold shadow-xs text-xs flex items-center space-x-2 disabled:opacity-50 transition-colors"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{isDeleting ? 'Deleting Account...' : 'Permanently Delete'}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

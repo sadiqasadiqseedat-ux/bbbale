@@ -8,7 +8,7 @@ export interface D1ExecResult {
 }
 
 export interface D1Response<T = unknown> {
-  results: T[];
+  results?: T[];
   success: boolean;
   meta: any;
   error?: string;
@@ -19,12 +19,12 @@ export interface D1PreparedStatement {
   first<T = unknown>(colName?: string): Promise<T | null>;
   run<T = unknown>(): Promise<D1Response<T>>;
   all<T = unknown>(): Promise<D1Response<T>>;
-  raw<T = unknown>(): Promise<T[]>;
+  raw?<T = unknown>(): Promise<T[]>;
 }
 
 export interface D1Database {
   prepare(query: string): D1PreparedStatement;
-  dump(): Promise<ArrayBuffer>;
+  dump?(): Promise<ArrayBuffer>;
   batch<T = unknown>(statements: D1PreparedStatement[]): Promise<D1Response<T>[]>;
   exec(query: string): Promise<D1ExecResult>;
 }
