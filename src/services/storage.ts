@@ -1033,21 +1033,61 @@ export const storageService = {
     }
   },
 
-  updateUserAccount: (updatedUser: User, actor: User): { success: boolean; error?: string } => {
+    updateUserAccount: async (updatedUser: User, actor: User): Promise<{ success: boolean; error?: string }> => {
     const existing = storageService.getUserById(updatedUser.id);
-    if (!existing) return { success: false, error: 'User not found' };
 
-    if (existing.role === 'PRINCIPAL_PARTNER') {
-      if (actor.id !== existing.id) {
-        return { success: false, error: 'Protected Account: Only the Principal Partner can update their own account.' };
-      }
+    if (!existing) {
+      return { success: false, error: 'User not found' };
     }
 
-    memory.users = memory.users.map(u => u.id === updatedUser.id ? updatedUser : u);
-    setToStorage(STORAGE_KEYS.USERS, memory.users);
-    notifySubscribers();
-    logAudit(actor, 'UPDATE_USER', 'User', updatedUser.id, `Updated user details for ${updatedUser.name}`);
-    return { success: true };
+    if (existing.role === 'PRINCIPAL_PARTNER' && actor.id !== existing.id) {
+      return {
+        success: false,
+        error: 'Protected Account: Only the Principal Partner can update their own account.'
+      };
+    }
+
+    try {
+      const response = await apiFetch(`/api/users/${encodeURIComponent(updatedUser.id)}`, {
+        method: 'PUT',
+        body: JSON.stringify(updatedUser)
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+
+        return {
+          success: false,
+          error: errorText || 'Failed to update user in Cloudflare D1.'
+        };
+      }
+
+      memory.users = memory.users.map(u =>
+        u.id === updatedUser.id ? updatedUser : u
+      );
+
+      setToStorage(STORAGE_KEYS.USERS, memory.users);
+      notifySubscribers();
+
+      logAudit(
+        actor,
+        'UPDATE_USER',
+        'User',
+        updatedUser.id,
+        `Updated user details for ${updatedUser.name}`
+      );
+
+      return { success: true };
+    } catch (error) {
+      console.error('Update user error:', error);
+
+      return {
+        success: false,
+        error: error instanceof Error
+          ? error.message
+          : 'Failed to update user in Cloudflare D1.'
+      };
+    }
   },
 
   setUserStatus: (targetUserId: string, newStatus: User['accountStatus'], actor: User): { success: boolean; error?: string } => {

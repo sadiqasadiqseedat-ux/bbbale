@@ -1,4 +1,6 @@
 import { WorkerEnv, ExecutionContext, D1Database } from '../types/worker';
+
+export type Env = WorkerEnv;
 import { 
   User, 
   UserRole, 
@@ -858,7 +860,182 @@ export async function handleApiRequest(
     }
 
     // --------------------------------------------------------------------------
-    // 4. CLIENTS ENDPOINTS
+    // 4. USER ACCOUNT ENDPOINTS
+    // --------------------------------------------------------------------------
+    if (path === '/api/users' && request.method === 'POST') {
+      const auth = await getAuthUser(request, db);
+
+      if (!auth) {
+        return errorResponse('Unauthorized: Valid personnel login required.', 401);
+      }
+
+      if (
+        auth.user.role !== 'PRINCIPAL_PARTNER' &&
+        auth.user.role !== 'HEAD_OF_CHAMBER'
+      ) {
+        return errorResponse(
+          'Unauthorized: Only Principal Partner or Head of Chamber can create user accounts.',
+          403
+        );
+      }
+
+      const body = await request.json() as any;
+
+      if (!body.id || !body.username || !body.name || !body.email || !body.role) {
+        return errorResponse('Required user information is missing.', 400);
+      }
+
+      const existing = await db.prepare(
+        'SELECT id FROM users WHERE LOWER(username) = ? OR LOWER(email) = ? LIMIT 1'
+      ).bind(
+        String(body.username).trim().toLowerCase(),
+        String(body.email).trim().toLowerCase()
+      ).first<any>();
+
+      if (existing) {
+        return errorResponse('Username or email already exists.', 409);
+      }
+
+      await db.prepare(
+        `INSERT INTO users
+        (
+          id, username, name, email, phone, role, branch_id, title,
+          practice_areas, bio, photo_url, availability,
+          is_publicly_visible, is_active, account_status,
+          password_hash, salt, requires_password_change,
+          failed_login_attempts, created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(
+        body.id,
+        String(body.username).trim().toLowerCase(),
+        body.name,
+        String(body.email).trim().toLowerCase(),
+        body.phone || '',
+        body.role,
+        body.branchId || 'br-abuja-01',
+        body.title || 'Chambers Legal Practitioner',
+        JSON.stringify(body.practiceAreas || []),
+        body.bio || '',
+        body.photoUrl || '',
+        body.availability || 'AVAILABLE',
+        body.isPubliclyVisible === false ? 0 : 1,
+        body.isActive === false ? 0 : 1,
+        body.accountStatus || 'Active',
+        body.passwordHash || '',
+        body.salt || '',
+        body.requiresPasswordChange === false ? 0 : 1,
+        body.failedLoginAttempts || 0,
+        body.createdAt || new Date().toISOString()
+      ).run();
+
+      await logAudit(
+        db,
+        auth.user.id,
+        auth.user.name,
+        auth.user.role,
+        'CREATE_USER',
+        'User',
+        body.id,
+        `Created user account: ${body.name} (${body.role})`
+      );
+
+      return jsonResponse({
+        success: true,
+        user: {
+          ...body,
+          username: String(body.username).trim().toLowerCase(),
+          email: String(body.email).trim().toLowerCase()
+        }
+      }, 201);
+    }
+
+    if (path.startsWith('/api/users/') && request.method === 'PUT') {
+      const auth = await getAuthUser(request, db);
+
+      if (!auth) {
+        return errorResponse('Unauthorized: Valid personnel login required.', 401);
+      }
+
+      if (
+        auth.user.role !== 'PRINCIPAL_PARTNER' &&
+        auth.user.role !== 'HEAD_OF_CHAMBER'
+      ) {
+        return errorResponse(
+          'Unauthorized: Only Principal Partner or Head of Chamber can update user accounts.',
+          403
+        );
+      }
+
+      const id = path.replace('/api/users/', '').trim();
+
+      if (!id) {
+        return errorResponse('User ID is required.', 400);
+      }
+
+      const body = await request.json() as any;
+
+      const existing = await db.prepare(
+        'SELECT id FROM users WHERE id = ?'
+      ).bind(id).first<any>();
+
+      if (!existing) {
+        return errorResponse('User not found.', 404);
+      }
+
+      await db.prepare(
+        `UPDATE users
+         SET username = ?,
+             name = ?,
+             email = ?,
+             phone = ?,
+             role = ?,
+             branch_id = ?,
+             title = ?,
+             practice_areas = ?,
+             bio = ?,
+             photo_url = ?,
+             availability = ?,
+             is_publicly_visible = ?,
+             is_active = ?,
+             account_status = ?,
+             requires_password_change = ?
+         WHERE id = ?`
+      ).bind(
+        String(body.username || '').trim().toLowerCase(),
+        body.name || '',
+        String(body.email || '').trim().toLowerCase(),
+        body.phone || '',
+        body.role,
+        body.branchId || 'br-abuja-01',
+        body.title || '',
+        JSON.stringify(body.practiceAreas || []),
+        body.bio || '',
+        body.photoUrl || '',
+        body.availability || 'AVAILABLE',
+        body.isPubliclyVisible === false ? 0 : 1,
+        body.isActive === false ? 0 : 1,
+        body.accountStatus || 'Active',
+        body.requiresPasswordChange === false ? 0 : 1,
+        id
+      ).run();
+
+      await logAudit(
+        db,
+        auth.user.id,
+        auth.user.name,
+        auth.user.role,
+        'UPDATE_USER',
+        'User',
+        id,
+        `Updated user account: ${body.name || id}`
+      );
+
+      return jsonResponse({ success: true });
+    }
+
+    // --------------------------------------------------------------------------
+    // 5. CLIENTS ENDPOINTS
     // --------------------------------------------------------------------------
     if (path === '/api/clients') {
       if (request.method === 'GET') {

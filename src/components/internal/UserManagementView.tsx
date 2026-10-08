@@ -218,13 +218,18 @@ export const UserManagementView: React.FC = () => {
   };
 
   // Handle Edit Submit
-  const handleEditSubmit = (e: React.FormEvent) => {
+  const handleEditSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedUser || !currentUser) return;
     setFormError('');
+    setFormSuccess('');
 
     // If Head of Chamber, cannot promote to Principal Partner
-    if (isHeadOfChamber && editForm.role === 'PRINCIPAL_PARTNER' && selectedUser.role !== 'PRINCIPAL_PARTNER') {
+    if (
+      isHeadOfChamber &&
+      editForm.role === 'PRINCIPAL_PARTNER' &&
+      selectedUser.role !== 'PRINCIPAL_PARTNER'
+    ) {
       setFormError('Head of Chamber cannot assign the Principal Partner role.');
       return;
     }
@@ -237,7 +242,10 @@ export const UserManagementView: React.FC = () => {
       role: editForm.role,
       branchId: editForm.branchId,
       title: editForm.title.trim(),
-      practiceAreas: editForm.practiceAreas.split(',').map(s => s.trim()).filter(Boolean),
+      practiceAreas: editForm.practiceAreas
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean),
       bio: editForm.bio.trim(),
       photoUrl: editForm.photoUrl.trim(),
       availability: editForm.availability,
@@ -247,10 +255,15 @@ export const UserManagementView: React.FC = () => {
       requiresPasswordChange: editForm.requiresPasswordChange
     };
 
-    const res = storageService.updateUserAccount(updatedUser, currentUser);
+    const res = await storageService.updateUserAccount(
+      updatedUser,
+      currentUser
+    );
+
     if (res.success) {
-      setIsEditOpen(false);
+      setFormSuccess(`User account for ${updatedUser.name} updated successfully.`);
       setSelectedUser(null);
+      setIsEditOpen(false);
     } else {
       setFormError(res.error || 'Failed to update user account.');
     }
