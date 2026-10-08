@@ -12,7 +12,7 @@ function devApiMiddlewarePlugin(): Plugin {
     name: 'dev-api-middleware',
     configureServer(server) {
       server.middlewares.use(async (req, res, next) => {
-        if (!req.url?.startsWith('/api/')) {
+        if (!req.url?.startsWith('/api/') && req.url !== '/api') {
           return next();
         }
 

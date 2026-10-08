@@ -880,6 +880,93 @@ export async function handleApiRequest(
     }
 
     // --------------------------------------------------------------------------
+    // 3.1 BRANCHES ENDPOINTS
+    // --------------------------------------------------------------------------
+    if (path === '/api/branches') {
+      if (request.method === 'GET') {
+        const rows = await db.prepare('SELECT * FROM branches WHERE is_active = 1').all<any>();
+        return jsonResponse({ success: true, branches: rows.results || [] });
+      }
+
+      if (request.method === 'POST') {
+        const auth = await getAuthUser(request, db);
+        if (!auth) {
+          return errorResponse('Unauthorized: Valid personnel login required.', 401);
+        }
+        if (auth.user.role !== 'PRINCIPAL_PARTNER') {
+          return errorResponse('Unauthorized: Only Principal Partner can create branches.', 403);
+        }
+        const body = await request.json() as any;
+        const id = body.id || `br-${Date.now()}`;
+        const name = body.name?.trim();
+        const code = body.code?.trim().toUpperCase();
+
+        if (!name || !code) {
+          return errorResponse('Branch name and code are required.', 400);
+        }
+
+        await db.prepare(
+          `INSERT INTO branches (id, name, code, address, city, state, phone, email, head_of_chamber_id, is_active)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).bind(
+          id, name, code, body.address || '', body.city || '', body.state || '',
+          body.phone || '', body.email || '', body.headOfChamberId || null, body.isActive === false ? 0 : 1
+        ).run();
+
+        await logAudit(db, auth.user.id, auth.user.name, auth.user.role, 'CREATE_BRANCH', 'Branch', id, `Established branch: ${name} (${code})`);
+        return jsonResponse({ success: true, branch: { ...body, id, name, code } }, 201);
+      }
+    }
+
+    if (path.startsWith('/api/branches/') && request.method === 'PUT') {
+      const auth = await getAuthUser(request, db);
+      if (!auth) {
+        return errorResponse('Unauthorized: Valid personnel login required.', 401);
+      }
+      if (auth.user.role !== 'PRINCIPAL_PARTNER') {
+        return errorResponse('Unauthorized: Only Principal Partner can update branches.', 403);
+      }
+      const branchId = path.replace('/api/branches/', '').trim();
+      const body = await request.json() as any;
+
+      await db.prepare(
+        `UPDATE branches
+         SET name = ?, code = ?, address = ?, city = ?, state = ?, phone = ?, email = ?, is_active = ?
+         WHERE id = ?`
+      ).bind(
+        body.name || '', String(body.code || '').toUpperCase(), body.address || '',
+        body.city || '', body.state || '', body.phone || '', body.email || '',
+        body.isActive === false ? 0 : 1, branchId
+      ).run();
+
+      await logAudit(db, auth.user.id, auth.user.name, auth.user.role, 'UPDATE_BRANCH', 'Branch', branchId, `Updated branch: ${body.name}`);
+      return jsonResponse({ success: true });
+    }
+
+    if (path.startsWith('/api/branches/') && request.method === 'DELETE') {
+      const auth = await getAuthUser(request, db);
+      if (!auth) {
+        return errorResponse('Unauthorized: Valid personnel login required.', 401);
+      }
+      if (auth.user.role !== 'PRINCIPAL_PARTNER') {
+        return errorResponse('Unauthorized: Only Principal Partner can delete branches.', 403);
+      }
+      const branchId = path.replace('/api/branches/', '').trim();
+      if (!branchId) return errorResponse('Branch ID is required.', 400);
+
+      if (branchId === 'br-abuja-01') {
+        return errorResponse('Forbidden: Abuja Head Chambers is the permanent headquarters and cannot be deleted.', 403);
+      }
+
+      const existing = await db.prepare('SELECT id, name FROM branches WHERE id = ?').bind(branchId).first<any>();
+      if (!existing) return errorResponse('Branch not found.', 404);
+
+      await db.prepare('DELETE FROM branches WHERE id = ?').bind(branchId).run();
+      await logAudit(db, auth.user.id, auth.user.name, auth.user.role, 'DELETE_BRANCH', 'Branch', branchId, `Permanently deleted branch: ${existing.name}`);
+      return jsonResponse({ success: true, message: `Branch ${existing.name} permanently deleted.` });
+    }
+
+    // --------------------------------------------------------------------------
     // 4. USER ACCOUNT ENDPOINTS
     // --------------------------------------------------------------------------
     if (path === '/api/users' && request.method === 'POST') {
@@ -1435,7 +1522,7 @@ export async function handleApiRequest(
            (id, matter_id, title, client_id, branch_id, lead_counsel_id, category, status, stage, engagement_date, client_visible_update, privileged_internal_notes)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         ).bind(
-          id, matterId, body.title, body.clientId, body.branchId || 'br-abuja-01', body.leadCounselId,
+          id, matterId, body.title || '', body.clientId || null, body.branchId || 'br-abuja-01', body.leadCounselId || null,
           body.category || 'General Litigation', body.status || 'Active', body.stage || 'Pleadings Preparation',
           body.engagementDate || new Date().toISOString().split('T')[0], body.clientVisibleUpdate || '', body.privilegedInternalNotes || ''
         ).run();
@@ -1446,6 +1533,48 @@ export async function handleApiRequest(
         }
         return jsonResponse({ success: true, matterId, id });
       }
+    }
+
+    if (path.startsWith('/api/matters/') && request.method === 'DELETE') {
+      const auth = await getAuthUser(request, db);
+      if (!auth) {
+        return errorResponse('Unauthorized: Valid personnel login required.', 401);
+      }
+      if (auth.user.role !== 'PRINCIPAL_PARTNER' && auth.user.role !== 'HEAD_OF_CHAMBER') {
+        return errorResponse('Unauthorized: Only Principal Partner or Head of Chamber can delete legal matters.', 403);
+      }
+      const matterId = path.replace('/api/matters/', '').trim();
+      if (!matterId) return errorResponse('Matter ID is required.', 400);
+
+      const existing = await db.prepare('SELECT id, matter_id, title FROM matters WHERE id = ? OR matter_id = ?').bind(matterId, matterId).first<any>();
+      if (!existing) return errorResponse('Matter not found.', 404);
+
+      await db.prepare('DELETE FROM matters WHERE id = ?').bind(existing.id).run();
+      await logAudit(db, auth.user.id, auth.user.name, auth.user.role, 'DELETE_MATTER', 'Matter', existing.id, `Permanently deleted matter: ${existing.title} (${existing.matter_id})`);
+      return jsonResponse({ success: true, message: `Legal matter ${existing.title} permanently deleted.` });
+    }
+
+    if (path.startsWith('/api/matters/') && request.method === 'PUT') {
+      const auth = await getAuthUser(request, db);
+      if (!auth) {
+        return errorResponse('Unauthorized: Valid personnel login required.', 401);
+      }
+      const matterId = path.replace('/api/matters/', '').trim();
+      const body = await request.json() as any;
+
+      await db.prepare(
+        `UPDATE matters
+         SET title = ?, category = ?, status = ?, stage = ?, lead_counsel_id = ?,
+             client_visible_update = ?, privileged_internal_notes = ?
+         WHERE id = ? OR matter_id = ?`
+      ).bind(
+        body.title || '', body.category || '', body.status || 'Active', body.stage || '',
+        body.leadCounselId || null, body.clientVisibleUpdate || '', body.privilegedInternalNotes || '',
+        matterId, matterId
+      ).run();
+
+      await logAudit(db, auth.user.id, auth.user.name, auth.user.role, 'UPDATE_MATTER', 'Matter', matterId, `Updated matter: ${body.title || matterId}`);
+      return jsonResponse({ success: true });
     }
 
     if (path === '/api/cases') {
@@ -1487,6 +1616,51 @@ export async function handleApiRequest(
         }
         return jsonResponse({ success: true, caseId, id });
       }
+    }
+
+    if (path.startsWith('/api/cases/') && request.method === 'DELETE') {
+      const auth = await getAuthUser(request, db);
+      if (!auth) {
+        return errorResponse('Unauthorized: Valid personnel login required.', 401);
+      }
+      if (auth.user.role !== 'PRINCIPAL_PARTNER' && auth.user.role !== 'HEAD_OF_CHAMBER') {
+        return errorResponse('Unauthorized: Only Principal Partner or Head of Chamber can delete litigation cases.', 403);
+      }
+      const caseId = path.replace('/api/cases/', '').trim();
+      if (!caseId) return errorResponse('Case ID is required.', 400);
+
+      const existing = await db.prepare('SELECT id, case_id, suit_number FROM cases WHERE id = ? OR case_id = ?').bind(caseId, caseId).first<any>();
+      if (!existing) return errorResponse('Case not found.', 404);
+
+      await db.prepare('DELETE FROM case_assignments WHERE case_id = ?').bind(existing.id).run().catch(() => {});
+      await db.prepare('DELETE FROM cases WHERE id = ?').bind(existing.id).run();
+      await logAudit(db, auth.user.id, auth.user.name, auth.user.role, 'DELETE_CASE', 'Case', existing.id, `Permanently deleted case: ${existing.suit_number} (${existing.case_id})`);
+      return jsonResponse({ success: true, message: `Litigation case ${existing.suit_number} permanently deleted.` });
+    }
+
+    if (path.startsWith('/api/cases/') && request.method === 'PUT') {
+      const auth = await getAuthUser(request, db);
+      if (!auth) {
+        return errorResponse('Unauthorized: Valid personnel login required.', 401);
+      }
+      const caseId = path.replace('/api/cases/', '').trim();
+      const body = await request.json() as any;
+
+      await db.prepare(
+        `UPDATE cases
+         SET suit_number = ?, judge = ?, counsel_id = ?, opposing_party = ?, opposing_counsel = ?,
+             case_type = ?, subject_matter = ?, next_court_date = ?, status = ?,
+             client_visible_update = ?, internal_strategy_notes = ?
+         WHERE id = ? OR case_id = ?`
+      ).bind(
+        body.suitNumber || '', body.judge || null, body.counselId, body.opposingParty || '', body.opposingCounsel || null,
+        body.caseType || 'Civil', body.subjectMatter || '', body.nextCourtDate || null, body.status || 'Hearing',
+        body.clientVisibleUpdate || '', body.internalStrategyNotes || '',
+        caseId, caseId
+      ).run();
+
+      await logAudit(db, auth.user.id, auth.user.name, auth.user.role, 'UPDATE_CASE', 'Case', caseId, `Updated litigation case: ${body.suitNumber || caseId}`);
+      return jsonResponse({ success: true });
     }
 
     if (path.startsWith('/api/case-assignments/') && request.method === 'PUT') {

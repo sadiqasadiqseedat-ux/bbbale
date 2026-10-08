@@ -1184,6 +1184,12 @@ export const storageService = {
     setToStorage(STORAGE_KEYS.BRANCHES, memory.branches);
     notifySubscribers();
     logAudit(actor, 'CREATE_BRANCH', 'Branch', newBranch.id, `Created branch: ${newBranch.name}`);
+
+    apiFetch('/api/branches', {
+      method: 'POST',
+      body: JSON.stringify(newBranch)
+    }).catch(err => console.error('Failed to create branch in D1:', err));
+
     return newBranch;
   },
   updateBranch: (branch: Branch, actor: User): void => {
@@ -1191,13 +1197,41 @@ export const storageService = {
     setToStorage(STORAGE_KEYS.BRANCHES, memory.branches);
     notifySubscribers();
     logAudit(actor, 'UPDATE_BRANCH', 'Branch', branch.id, `Updated branch: ${branch.name}`);
+
+    apiFetch(`/api/branches/${encodeURIComponent(branch.id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(branch)
+    }).catch(err => console.error('Failed to update branch in D1:', err));
   },
-  deleteBranch: (branchId: string, actor: User): { success: boolean; error?: string } => {
-    if (actor.role !== 'PRINCIPAL_PARTNER') return { success: false, error: 'Unauthorized' };
-    memory.branches = memory.branches.filter(b => b.id !== branchId);
-    setToStorage(STORAGE_KEYS.BRANCHES, memory.branches);
-    notifySubscribers();
-    return { success: true };
+  deleteBranch: async (branchId: string, actor: User): Promise<{ success: boolean; error?: string }> => {
+    if (actor.role !== 'PRINCIPAL_PARTNER') {
+      return { success: false, error: 'Unauthorized: Only the Principal Partner can delete branches.' };
+    }
+    if (branchId === 'br-abuja-01') {
+      return { success: false, error: 'Protected Branch: Abuja Head Chambers is the permanent headquarters and cannot be deleted.' };
+    }
+
+    const existing = memory.branches.find(b => b.id === branchId);
+    if (!existing) return { success: false, error: 'Branch not found' };
+
+    try {
+      const res = await apiFetch<{ success: boolean; error?: string }>(`/api/branches/${encodeURIComponent(branchId)}`, {
+        method: 'DELETE'
+      });
+
+      if (!res?.success) {
+        return { success: false, error: res?.error || 'Failed to delete branch from Cloudflare D1.' };
+      }
+
+      memory.branches = memory.branches.filter(b => b.id !== branchId);
+      setToStorage(STORAGE_KEYS.BRANCHES, memory.branches);
+      notifySubscribers();
+      logAudit(actor, 'DELETE_BRANCH', 'Branch', branchId, `Permanently deleted branch: ${existing.name}`);
+      return { success: true };
+    } catch (err: any) {
+      console.error('Error deleting branch from D1:', err);
+      return { success: false, error: err.message || 'Failed to delete branch from Cloudflare D1' };
+    }
   },
 
   // Courts
@@ -1534,6 +1568,37 @@ export const storageService = {
     setToStorage(STORAGE_KEYS.MATTERS, memory.matters);
     notifySubscribers();
     logAudit(actor, 'UPDATE_MATTER', 'Matter', matter.id, `Updated matter: ${matter.title}`);
+
+    apiFetch(`/api/matters/${encodeURIComponent(matter.id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(matter)
+    }).catch(e => console.error('Failed updating matter in D1:', e));
+  },
+
+  deleteMatter: async (matterId: string, actor: User): Promise<{ success: boolean; error?: string }> => {
+    if (actor.role !== 'PRINCIPAL_PARTNER' && actor.role !== 'HEAD_OF_CHAMBER') {
+      return { success: false, error: 'Unauthorized: Only Principal Partner or Head of Chamber can delete legal matters.' };
+    }
+    const target = memory.matters.find(m => m.id === matterId || m.matterId === matterId);
+    if (!target) return { success: false, error: 'Matter not found' };
+
+    try {
+      const res = await apiFetch<{ success: boolean; error?: string }>(`/api/matters/${encodeURIComponent(target.id)}`, {
+        method: 'DELETE'
+      });
+      if (!res?.success) {
+        return { success: false, error: res?.error || 'Failed to delete matter from Cloudflare D1.' };
+      }
+
+      memory.matters = memory.matters.filter(m => m.id !== target.id && m.matterId !== target.matterId);
+      setToStorage(STORAGE_KEYS.MATTERS, memory.matters);
+      notifySubscribers();
+      logAudit(actor, 'DELETE_MATTER', 'Matter', target.id, `Permanently deleted matter: ${target.title} (${target.matterId})`);
+      return { success: true };
+    } catch (err: any) {
+      console.error('Error deleting matter from D1:', err);
+      return { success: false, error: err.message || 'Failed to delete matter from Cloudflare D1' };
+    }
   },
 
   // Cases & Assignments
@@ -1576,6 +1641,39 @@ export const storageService = {
     setToStorage(STORAGE_KEYS.CASES, memory.cases);
     notifySubscribers();
     logAudit(actor, 'UPDATE_CASE', 'Case', caseRecord.id, `Updated litigation record: ${caseRecord.suitNumber}`);
+
+    apiFetch(`/api/cases/${encodeURIComponent(caseRecord.id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(caseRecord)
+    }).catch(e => console.error('Failed updating case in D1:', e));
+  },
+
+  deleteCase: async (caseId: string, actor: User): Promise<{ success: boolean; error?: string }> => {
+    if (actor.role !== 'PRINCIPAL_PARTNER' && actor.role !== 'HEAD_OF_CHAMBER') {
+      return { success: false, error: 'Unauthorized: Only Principal Partner or Head of Chamber can delete litigation cases.' };
+    }
+    const target = memory.cases.find(c => c.id === caseId || c.caseId === caseId);
+    if (!target) return { success: false, error: 'Case not found' };
+
+    try {
+      const res = await apiFetch<{ success: boolean; error?: string }>(`/api/cases/${encodeURIComponent(target.id)}`, {
+        method: 'DELETE'
+      });
+      if (!res?.success) {
+        return { success: false, error: res?.error || 'Failed to delete case from Cloudflare D1.' };
+      }
+
+      memory.cases = memory.cases.filter(c => c.id !== target.id && c.caseId !== target.caseId);
+      memory.caseAssignments = memory.caseAssignments.filter(a => a.caseId !== target.id);
+      setToStorage(STORAGE_KEYS.CASES, memory.cases);
+      setToStorage(STORAGE_KEYS.CASE_ASSIGNMENTS, memory.caseAssignments);
+      notifySubscribers();
+      logAudit(actor, 'DELETE_CASE', 'Case', target.id, `Permanently deleted case: ${target.suitNumber} (${target.caseId})`);
+      return { success: true };
+    } catch (err: any) {
+      console.error('Error deleting case from D1:', err);
+      return { success: false, error: err.message || 'Failed to delete case from Cloudflare D1' };
+    }
   },
 
   // Case Assignments

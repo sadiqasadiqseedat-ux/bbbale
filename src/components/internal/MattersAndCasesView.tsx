@@ -12,7 +12,9 @@ import {
   AlertCircle,
   Eye,
   CheckCircle2,
-  Clock
+  Clock,
+  Trash2,
+  X
 } from 'lucide-react';
 import { storageService, subscribeToStore } from '../../services/storage';
 import { useAuth } from '../../context/AuthContext';
@@ -48,6 +50,14 @@ export const MattersAndCasesView: React.FC = () => {
   const [selectedCase, setSelectedCase] = useState<CaseRecord | null>(null);
   const [selectedMatter, setSelectedMatter] = useState<Matter | null>(null);
   const [printDoc, setPrintDoc] = useState<PrintableDocumentType | null>(null);
+
+  // Deletion States & Authority Check
+  const canDeleteLitigation = isPrincipalPartner || isHeadOfChamber;
+  const [caseToDelete, setCaseToDelete] = useState<CaseRecord | null>(null);
+  const [matterToDelete, setMatterToDelete] = useState<Matter | null>(null);
+  const [isDeletingCase, setIsDeletingCase] = useState(false);
+  const [isDeletingMatter, setIsDeletingMatter] = useState(false);
+  const [actionNotice, setActionNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   // New Case Modal
   const [isNewCaseOpen, setIsNewCaseOpen] = useState(false);
@@ -128,6 +138,60 @@ export const MattersAndCasesView: React.FC = () => {
     const updated = { ...selectedCase, clientVisibleUpdate: updateText };
     storageService.updateCase(updated, currentUser);
     setSelectedCase(updated);
+  };
+
+  const handleConfirmDeleteCase = async () => {
+    if (!caseToDelete || !currentUser) return;
+    setIsDeletingCase(true);
+    setActionNotice(null);
+
+    const deletedSuit = caseToDelete.suitNumber;
+    const res = await storageService.deleteCase(caseToDelete.id, currentUser);
+    setIsDeletingCase(false);
+
+    if (res.success) {
+      if (selectedCase?.id === caseToDelete.id) {
+        setSelectedCase(null);
+      }
+      setCaseToDelete(null);
+      setActionNotice({
+        type: 'success',
+        message: `Litigation cause "${deletedSuit}" has been permanently expunged from the docket and database.`
+      });
+      loadData();
+    } else {
+      setActionNotice({
+        type: 'error',
+        message: res.error || 'Failed to delete litigation case.'
+      });
+    }
+  };
+
+  const handleConfirmDeleteMatter = async () => {
+    if (!matterToDelete || !currentUser) return;
+    setIsDeletingMatter(true);
+    setActionNotice(null);
+
+    const deletedTitle = matterToDelete.title;
+    const res = await storageService.deleteMatter(matterToDelete.id, currentUser);
+    setIsDeletingMatter(false);
+
+    if (res.success) {
+      if (selectedMatter?.id === matterToDelete.id) {
+        setSelectedMatter(null);
+      }
+      setMatterToDelete(null);
+      setActionNotice({
+        type: 'success',
+        message: `Legal matter "${deletedTitle}" has been permanently deleted from Chambers records.`
+      });
+      loadData();
+    } else {
+      setActionNotice({
+        type: 'error',
+        message: res.error || 'Failed to delete legal matter.'
+      });
+    }
   };
 
   const filteredCases = cases.filter(c => {
@@ -211,6 +275,32 @@ export const MattersAndCasesView: React.FC = () => {
         )}
       </div>
 
+      {/* Action Notification Alert */}
+      {actionNotice && (
+        <div
+          className={`p-3.5 rounded-xl border text-xs flex items-center justify-between shadow-xs ${
+            actionNotice.type === 'success'
+              ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+              : 'bg-rose-50 border-rose-200 text-rose-800'
+          }`}
+        >
+          <div className="flex items-center space-x-2">
+            {actionNotice.type === 'success' ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            ) : (
+              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+            )}
+            <span className="font-medium">{actionNotice.message}</span>
+          </div>
+          <button
+            onClick={() => setActionNotice(null)}
+            className="text-slate-400 hover:text-slate-600 font-bold ml-2 text-sm"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Cases View */}
       {activeTab === 'cases' && (
         <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
@@ -264,13 +354,23 @@ export const MattersAndCasesView: React.FC = () => {
                             {c.status}
                           </span>
                         </td>
-                        <td className="p-3.5 text-right space-x-1">
+                        <td className="p-3.5 text-right space-x-1 whitespace-nowrap">
                           <button
                             onClick={() => setSelectedCase(c)}
-                            className="px-2.5 py-1 text-xs text-amber-700 hover:text-amber-900 font-semibold border border-amber-300 rounded hover:bg-amber-50"
+                            className="px-2.5 py-1 text-xs text-amber-700 hover:text-amber-900 font-semibold border border-amber-300 rounded hover:bg-amber-50 transition-colors"
                           >
                             Manage Suit
                           </button>
+                          {canDeleteLitigation && (
+                            <button
+                              onClick={() => setCaseToDelete(c)}
+                              className="px-2 py-1 text-xs text-rose-700 hover:text-rose-900 font-semibold border border-rose-300 rounded hover:bg-rose-50 transition-colors"
+                              title="Permanently delete litigation cause from Chambers records"
+                            >
+                              <Trash2 className="w-3.5 h-3.5 inline mr-1" />
+                              <span>Delete</span>
+                            </button>
+                          )}
                         </td>
                       </tr>
                     );
@@ -295,18 +395,19 @@ export const MattersAndCasesView: React.FC = () => {
                   <th className="p-3.5">Stage</th>
                   <th className="p-3.5">Client Visible Update</th>
                   <th className="p-3.5">Status</th>
+                  <th className="p-3.5 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {filteredMatters.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="p-8 text-center text-slate-400">
+                    <td colSpan={7} className="p-8 text-center text-slate-400">
                       No legal matters recorded.
                     </td>
                   </tr>
                 ) : (
                   filteredMatters.map(m => (
-                    <tr key={m.id} className="hover:bg-slate-50">
+                    <tr key={m.id} className="hover:bg-slate-50 transition-colors">
                       <td className="p-3.5 font-mono font-bold text-slate-900">{m.matterId}</td>
                       <td className="p-3.5 font-semibold text-slate-900">{m.title}</td>
                       <td className="p-3.5 text-slate-600">{m.category}</td>
@@ -316,6 +417,24 @@ export const MattersAndCasesView: React.FC = () => {
                         <span className="font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded">
                           {m.status}
                         </span>
+                      </td>
+                      <td className="p-3.5 text-right space-x-1 whitespace-nowrap">
+                        <button
+                          onClick={() => setSelectedMatter(m)}
+                          className="px-2.5 py-1 text-xs text-amber-700 hover:text-amber-900 font-semibold border border-amber-300 rounded hover:bg-amber-50 transition-colors"
+                        >
+                          View Details
+                        </button>
+                        {canDeleteLitigation && (
+                          <button
+                            onClick={() => setMatterToDelete(m)}
+                            className="px-2 py-1 text-xs text-rose-700 hover:text-rose-900 font-semibold border border-rose-300 rounded hover:bg-rose-50 transition-colors"
+                            title="Permanently delete legal matter"
+                          >
+                            <Trash2 className="w-3.5 h-3.5 inline mr-1" />
+                            <span>Delete</span>
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))
@@ -429,14 +548,27 @@ export const MattersAndCasesView: React.FC = () => {
             </div>
 
             {/* Print & Action Bar */}
-            <div className="flex justify-between items-center pt-2 border-t border-slate-200">
-              <button
-                onClick={() => setPrintDoc({ type: 'CASE_SUMMARY', data: selectedCase })}
-                className="px-4 py-2 border border-slate-300 hover:bg-slate-50 rounded-lg text-xs font-semibold flex items-center space-x-2"
-              >
-                <Printer className="w-4 h-4 text-slate-600" />
-                <span>Print Official Case Summary Brief</span>
-              </button>
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pt-2 border-t border-slate-200">
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={() => setPrintDoc({ type: 'CASE_SUMMARY', data: selectedCase })}
+                  className="px-4 py-2 border border-slate-300 hover:bg-slate-50 rounded-lg text-xs font-semibold flex items-center space-x-2"
+                >
+                  <Printer className="w-4 h-4 text-slate-600" />
+                  <span>Print Case Summary</span>
+                </button>
+                {canDeleteLitigation && (
+                  <button
+                    onClick={() => {
+                      setCaseToDelete(selectedCase);
+                    }}
+                    className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg text-xs font-bold flex items-center space-x-1.5 transition-colors"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    <span>Delete Suit</span>
+                  </button>
+                )}
+              </div>
 
               <div className="text-xs text-slate-500 font-mono">
                 Next Hearing: {selectedCase.nextCourtDate || 'Not yet scheduled'}
@@ -649,6 +781,227 @@ export const MattersAndCasesView: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Matter Details Modal */}
+      {selectedMatter && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full p-6 sm:p-8 space-y-6 max-h-[90vh] overflow-y-auto border border-slate-300 animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-start pb-4 border-b border-slate-200">
+              <div>
+                <span className="text-xs font-mono font-bold text-amber-700 uppercase">
+                  {selectedMatter.matterId}
+                </span>
+                <h2 className="text-xl font-serif font-bold text-slate-900 mt-0.5">
+                  {selectedMatter.title}
+                </h2>
+                <p className="text-xs text-slate-500 font-medium">
+                  Category: {selectedMatter.category} · Stage: {selectedMatter.stage}
+                </p>
+              </div>
+              <button
+                onClick={() => setSelectedMatter(null)}
+                className="text-slate-400 hover:text-slate-600 text-sm font-bold"
+              >
+                ✕ Close
+              </button>
+            </div>
+
+            <div className="space-y-4 text-xs">
+              <div className="grid grid-cols-2 gap-4 bg-slate-50 p-4 rounded-lg border border-slate-200">
+                <div>
+                  <span className="text-slate-400 block font-semibold">Matter Status:</span>
+                  <span className="font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded inline-block mt-0.5">
+                    {selectedMatter.status}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block font-semibold">Engagement Date:</span>
+                  <span className="font-medium text-slate-800 block mt-0.5">
+                    {selectedMatter.engagementDate || 'N/A'}
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <span className="font-bold text-slate-700 block mb-1">Client Visible Progress Update:</span>
+                <p className="p-3 bg-blue-50/50 border border-blue-200 rounded text-slate-700">
+                  {selectedMatter.clientVisibleUpdate || 'No public update published yet.'}
+                </p>
+              </div>
+
+              {selectedMatter.privilegedInternalNotes && (
+                <div>
+                  <span className="font-bold text-red-950 block mb-1 flex items-center space-x-1">
+                    <AlertCircle className="w-3.5 h-3.5 text-red-700" />
+                    <span>Confidential Internal Privileged Notes:</span>
+                  </span>
+                  <p className="p-3 bg-red-50/50 border border-red-200 rounded text-slate-700 whitespace-pre-wrap">
+                    {selectedMatter.privilegedInternalNotes}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-between items-center pt-3 border-t border-slate-200">
+              {canDeleteLitigation ? (
+                <button
+                  onClick={() => {
+                    setMatterToDelete(selectedMatter);
+                    setSelectedMatter(null);
+                  }}
+                  className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg text-xs font-bold flex items-center space-x-1.5 transition-colors"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  <span>Permanently Delete Matter</span>
+                </button>
+              ) : <div />}
+
+              <button
+                onClick={() => setSelectedMatter(null)}
+                className="px-4 py-2 border border-slate-300 hover:bg-slate-50 rounded-lg text-xs font-semibold text-slate-700"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Case Confirmation Modal */}
+      {caseToDelete && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 space-y-5 border border-rose-200 animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-start justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-full bg-rose-100 text-rose-700 flex items-center justify-center shrink-0">
+                  <Trash2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-serif font-bold text-slate-900">
+                    Delete Litigation Cause
+                  </h3>
+                  <p className="text-xs text-rose-600 font-semibold">
+                    Permanent Chambers Database Deletion
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setCaseToDelete(null)}
+                className="text-slate-400 hover:text-slate-600 p-1"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs text-slate-600">
+              <p>Are you sure you want to permanently delete this court case and its litigation assignments?</p>
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-1">
+                <p className="font-mono font-bold text-slate-900 text-sm">{caseToDelete.suitNumber}</p>
+                <p className="text-slate-700 font-medium">vs {caseToDelete.opposingParty}</p>
+                <p className="text-slate-500">{caseToDelete.judicialDivision} · Case Code: {caseToDelete.caseId}</p>
+              </div>
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-900 text-[11px] space-y-1">
+                <p className="font-bold flex items-center space-x-1">
+                  <AlertCircle className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                  <span>Permanent Action Warning:</span>
+                </p>
+                <p>
+                  This litigation cause will be permanently expunged from the Cloudflare D1 central database and docket.
+                  Authorized by {isPrincipalPartner ? 'Principal Partner' : 'Head of Chamber'}.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex justify-end space-x-2 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                disabled={isDeletingCase}
+                onClick={() => setCaseToDelete(null)}
+                className="px-4 py-2 border border-slate-300 rounded-lg font-semibold text-slate-700 hover:bg-slate-50 text-xs disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingCase}
+                onClick={handleConfirmDeleteCase}
+                className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-bold shadow-xs text-xs flex items-center space-x-2 disabled:opacity-50 transition-colors"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{isDeletingCase ? 'Deleting Case...' : 'Permanently Delete'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Matter Confirmation Modal */}
+      {matterToDelete && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 space-y-5 border border-rose-200 animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-start justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-full bg-rose-100 text-rose-700 flex items-center justify-center shrink-0">
+                  <Trash2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-serif font-bold text-slate-900">
+                    Delete Legal Matter
+                  </h3>
+                  <p className="text-xs text-rose-600 font-semibold">
+                    Permanent Chambers Database Deletion
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setMatterToDelete(null)}
+                className="text-slate-400 hover:text-slate-600 p-1"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs text-slate-600">
+              <p>Are you sure you want to permanently delete this legal matter record?</p>
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-1">
+                <p className="font-bold text-slate-900 text-sm">{matterToDelete.title}</p>
+                <p className="font-mono text-amber-800 text-[11px]">{matterToDelete.matterId}</p>
+                <p className="text-slate-500">{matterToDelete.category} · Stage: {matterToDelete.stage}</p>
+              </div>
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-900 text-[11px] space-y-1">
+                <p className="font-bold flex items-center space-x-1">
+                  <AlertCircle className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                  <span>Permanent Action Warning:</span>
+                </p>
+                <p>
+                  This matter record will be permanently deleted from the Cloudflare D1 central database.
+                  Authorized by {isPrincipalPartner ? 'Principal Partner' : 'Head of Chamber'}.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex justify-end space-x-2 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                disabled={isDeletingMatter}
+                onClick={() => setMatterToDelete(null)}
+                className="px-4 py-2 border border-slate-300 rounded-lg font-semibold text-slate-700 hover:bg-slate-50 text-xs disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingMatter}
+                onClick={handleConfirmDeleteMatter}
+                className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-bold shadow-xs text-xs flex items-center space-x-2 disabled:opacity-50 transition-colors"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{isDeletingMatter ? 'Deleting Matter...' : 'Permanently Delete'}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -55,7 +55,7 @@ export function createDevD1Database(dbFilePath: string = './.base44/chambers_d1_
         let boundParams: any[] = [];
         return {
           bind(...params: any[]) {
-            boundParams = params;
+            boundParams = params.map(p => (p === undefined ? null : p));
             return this;
           },
           async all() {

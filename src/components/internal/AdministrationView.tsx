@@ -178,11 +178,12 @@ export const AdministrationView: React.FC = () => {
     setBranchToDelete(b);
   };
 
-  const confirmDeleteBranch = (b: Branch) => {
+  const confirmDeleteBranch = async (b: Branch) => {
     if (!currentUser) return;
-    const res = storageService.deleteBranch(b.id, currentUser);
+    const res = await storageService.deleteBranch(b.id, currentUser);
     if (res.success) {
-      setBranchActionSuccess(`Branch "${b.name}" deleted.`);
+      setBranchActionSuccess(`Branch "${b.name}" permanently deleted.`);
+      setBranchToDelete(null);
       setTimeout(() => setBranchActionSuccess(''), 3000);
     } else {
       setBranchActionError(res.error || 'Failed to delete branch.');
