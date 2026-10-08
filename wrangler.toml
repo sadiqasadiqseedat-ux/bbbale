@@ -8,6 +8,6 @@ pages_build_output_dir = "dist"
 [[d1_databases]]
 binding = "DB"
 database_name = "bbbale"
-database_id = "60c1e783-fa57-48b3-9b37-8d0041a4e80a"
+database_id = "349d3f2c-bc47-418b-ade9-574de9c9812b"
 migrations_dir = "migrations"
 
