@@ -995,20 +995,20 @@ export const storageService = {
     };
 
     try {
-      const response = await apiFetch('/api/users', {
+      const response = await apiFetch<{ success: boolean; user?: User; error?: string }>('/api/users', {
         method: 'POST',
         body: JSON.stringify(newUser)
       });
 
-      if (!response.ok) {
-        const errorText = await response.text();
+      if (!response || !response.success) {
         return {
           success: false,
-          error: errorText || 'Failed to save user to Cloudflare D1.'
+          error: response?.error || 'Failed to save user to Cloudflare D1.'
         };
       }
 
-      memory.users = [...memory.users, newUser];
+      const savedUser = response.user || newUser;
+      memory.users = [...memory.users, savedUser];
       setToStorage(STORAGE_KEYS.USERS, memory.users);
       notifySubscribers();
 
@@ -1016,11 +1016,11 @@ export const storageService = {
         actor,
         'CREATE_USER',
         'User',
-        newUser.id,
-        `Created user: ${newUser.name} (${newUser.role})`
+        savedUser.id,
+        `Created user: ${savedUser.name} (${savedUser.role})`
       );
 
-      return { success: true, user: newUser };
+      return { success: true, user: savedUser };
     } catch (error) {
       console.error('Create user error:', error);
 
@@ -1033,7 +1033,7 @@ export const storageService = {
     }
   },
 
-    updateUserAccount: async (updatedUser: User, actor: User): Promise<{ success: boolean; error?: string }> => {
+  updateUserAccount: async (updatedUser: User, actor: User): Promise<{ success: boolean; error?: string }> => {
     const existing = storageService.getUserById(updatedUser.id);
 
     if (!existing) {
@@ -1048,17 +1048,15 @@ export const storageService = {
     }
 
     try {
-      const response = await apiFetch(`/api/users/${encodeURIComponent(updatedUser.id)}`, {
+      const response = await apiFetch<{ success: boolean; user?: User; error?: string }>(`/api/users/${encodeURIComponent(updatedUser.id)}`, {
         method: 'PUT',
         body: JSON.stringify(updatedUser)
       });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-
+      if (!response || !response.success) {
         return {
           success: false,
-          error: errorText || 'Failed to update user in Cloudflare D1.'
+          error: response?.error || 'Failed to update user in Cloudflare D1.'
         };
       }
 

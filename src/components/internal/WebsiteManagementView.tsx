@@ -613,7 +613,13 @@ export const WebsiteManagementView: React.FC = () => {
                   <tr key={u.id} className="hover:bg-slate-50">
                     <td className="p-3.5">
                       <div className="flex items-center space-x-3">
-                        <img src={u.photoUrl} alt={u.name} className="w-9 h-9 rounded-full object-cover border border-slate-200" />
+                        {u.photoUrl ? (
+                          <img src={u.photoUrl} alt={u.name} className="w-9 h-9 rounded-full object-cover border border-slate-200" />
+                        ) : (
+                          <div className="w-9 h-9 rounded-full bg-amber-900/10 border border-amber-600/30 flex items-center justify-center text-amber-900 font-bold text-xs shrink-0 font-serif">
+                            {u.name.split(' ').map(n => n[0]).filter(Boolean).slice(0, 2).join('')}
+                          </div>
+                        )}
                         <div>
                           <p className="font-bold text-slate-900">{u.name}</p>
                           <p className="text-[10px] text-slate-400 font-mono">{u.email}</p>

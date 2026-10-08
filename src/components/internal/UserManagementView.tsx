@@ -511,11 +511,17 @@ export const UserManagementView: React.FC = () => {
                       {/* Profile Column */}
                       <td className="p-3.5">
                         <div className="flex items-start space-x-3">
-                          <img
-                            src={u.photoUrl}
-                            alt={u.name}
-                            className="w-10 h-10 rounded-full object-cover border border-slate-200 shrink-0"
-                          />
+                          {u.photoUrl ? (
+                            <img
+                              src={u.photoUrl}
+                              alt={u.name}
+                              className="w-10 h-10 rounded-full object-cover border border-slate-200 shrink-0"
+                            />
+                          ) : (
+                            <div className="w-10 h-10 rounded-full bg-amber-900/10 border border-amber-600/30 flex items-center justify-center text-amber-900 font-bold text-xs shrink-0 font-serif">
+                              {u.name.split(' ').map(n => n[0]).filter(Boolean).slice(0, 2).join('')}
+                            </div>
+                          )}
                           <div className="min-w-0">
                             <div className="flex items-center space-x-1.5">
                               <span className="font-bold text-slate-900 truncate">{u.name}</span>

@@ -3,10 +3,10 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 import { defineConfig, Plugin } from 'vite';
 import { handleApiRequest } from './src/server/apiHandler';
-import { getDevD1Database } from './src/server/devD1';
+import { createDevD1Database } from './src/server/devD1Adapter';
 
 function devApiMiddlewarePlugin(): Plugin {
-  const devDb = getDevD1Database();
+  const devDb = createDevD1Database();
 
   return {
     name: 'dev-api-middleware',

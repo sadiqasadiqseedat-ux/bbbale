@@ -35,12 +35,18 @@ export const LeadershipPage: React.FC = () => {
       {/* Principal Partner Feature */}
       {principal && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-lg overflow-hidden grid grid-cols-1 lg:grid-cols-12">
-          <div className="lg:col-span-5 bg-slate-900 relative min-h-[380px]">
-            <img
-              src={principal.photoUrl}
-              alt={principal.name}
-              className="w-full h-full object-cover"
-            />
+          <div className="lg:col-span-5 bg-slate-900 relative min-h-[380px] flex items-center justify-center">
+            {principal.photoUrl ? (
+              <img
+                src={principal.photoUrl}
+                alt={principal.name}
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <div className="w-32 h-32 rounded-full bg-slate-800 border-2 border-amber-500/40 flex items-center justify-center text-amber-400 font-serif font-bold text-3xl">
+                {principal.name.split(' ').map(n => n[0]).filter(Boolean).slice(0, 2).join('')}
+              </div>
+            )}
             <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-transparent"></div>
             <div className="absolute bottom-4 left-4 right-4 text-white">
               <span className="inline-block text-[11px] font-bold text-amber-400 bg-slate-950/60 px-2.5 py-1 rounded backdrop-blur-xs font-mono">
@@ -98,11 +104,17 @@ export const LeadershipPage: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
           {partners.map(partner => (
             <div key={partner.id} className="bg-white rounded-xl border border-slate-200 shadow-xs p-6 flex flex-col sm:flex-row gap-6">
-              <img
-                src={partner.photoUrl}
-                alt={partner.name}
-                className="w-28 h-28 sm:w-36 sm:h-36 rounded-xl object-cover shrink-0 border border-slate-200"
-              />
+              {partner.photoUrl ? (
+                <img
+                  src={partner.photoUrl}
+                  alt={partner.name}
+                  className="w-28 h-28 sm:w-36 sm:h-36 rounded-xl object-cover shrink-0 border border-slate-200"
+                />
+              ) : (
+                <div className="w-28 h-28 sm:w-36 sm:h-36 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-800 font-serif font-bold text-2xl shrink-0">
+                  {partner.name.split(' ').map(n => n[0]).filter(Boolean).slice(0, 2).join('')}
+                </div>
+              )}
               <div className="space-y-2">
                 <span className="text-[10px] font-bold text-amber-700 uppercase tracking-wider">
                   HEAD OF CHAMBER
@@ -270,12 +282,18 @@ export const CounselPage: React.FC = () => {
         {filtered.map(counsel => (
           <div key={counsel.id} className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden flex flex-col justify-between hover:shadow-md transition-shadow">
             <div>
-              <div className="relative h-64 bg-slate-900 overflow-hidden">
-                <img
-                  src={counsel.photoUrl}
-                  alt={counsel.name}
-                  className="w-full h-full object-cover"
-                />
+              <div className="relative h-64 bg-slate-900 overflow-hidden flex items-center justify-center">
+                {counsel.photoUrl ? (
+                  <img
+                    src={counsel.photoUrl}
+                    alt={counsel.name}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="w-24 h-24 rounded-full bg-slate-800 border-2 border-amber-500/40 flex items-center justify-center text-amber-300 font-serif font-bold text-2xl">
+                    {counsel.name.split(' ').map(n => n[0]).filter(Boolean).slice(0, 2).join('')}
+                  </div>
+                )}
                 <div className="absolute bottom-3 left-3">
                   {renderBadge(counsel.availability)}
                 </div>

@@ -248,11 +248,17 @@ export const InternalLayout: React.FC<InternalLayoutProps> = ({
             {currentUser && (
               <div className="p-3 bg-slate-800/80 rounded-xl border border-slate-700/60 space-y-2">
                 <div className="flex items-center space-x-3">
-                  <img
-                    src={currentUser.photoUrl}
-                    alt={currentUser.name}
-                    className="w-10 h-10 rounded-lg object-cover border border-amber-500/40"
-                  />
+                  {currentUser.photoUrl ? (
+                    <img
+                      src={currentUser.photoUrl}
+                      alt={currentUser.name}
+                      className="w-10 h-10 rounded-lg object-cover border border-amber-500/40 shrink-0"
+                    />
+                  ) : (
+                    <div className="w-10 h-10 rounded-lg bg-amber-900/60 border border-amber-500/40 flex items-center justify-center text-amber-300 font-bold text-xs shrink-0 font-serif">
+                      {currentUser.name.split(' ').map(n => n[0]).filter(Boolean).slice(0, 2).join('')}
+                    </div>
+                  )}
                   <div className="min-w-0 flex-1">
                     <p className="text-xs font-bold text-white truncate">{currentUser.name}</p>
                     <p className="text-[11px] text-amber-400 font-medium truncate">{currentUser.title}</p>

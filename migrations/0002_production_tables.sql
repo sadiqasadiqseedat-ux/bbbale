@@ -109,23 +109,33 @@ CREATE TABLE IF NOT EXISTS rent_records (
   FOREIGN KEY (property_id) REFERENCES properties(id)
 );
 
--- 7. Property Disputes & Tribunal Cases
+-- 7. Property Disputes & Recovery of Premises Workflow
 CREATE TABLE IF NOT EXISTS property_disputes (
   id TEXT PRIMARY KEY,
   property_id TEXT NOT NULL,
   tenant_id TEXT,
-  landlord_id TEXT NOT NULL,
-  nature_of_dispute TEXT NOT NULL,
+  landlord_id TEXT,
+  complaint_title TEXT,
+  nature_of_dispute TEXT,
+  workflow_stage TEXT NOT NULL DEFAULT 'Complaint Received',
   status TEXT NOT NULL DEFAULT 'Under Legal Review',
-  assigned_counsel_id TEXT NOT NULL,
+  notice_served_date TEXT,
+  notice_expiry_date TEXT,
+  counsel_in_charge_id TEXT,
+  assigned_counsel_id TEXT,
   suit_number TEXT,
   tribunal_court TEXT,
-  summary TEXT NOT NULL,
-  date_logged TEXT NOT NULL,
+  status_summary TEXT,
+  summary TEXT,
+  counsel_notes TEXT,
+  date_logged TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  FOREIGN KEY (property_id) REFERENCES properties(id),
-  FOREIGN KEY (assigned_counsel_id) REFERENCES users(id)
+  updated_at TEXT,
+  FOREIGN KEY (property_id) REFERENCES properties(id)
 );
+
+CREATE INDEX IF NOT EXISTS idx_property_disputes_property ON property_disputes(property_id);
+CREATE INDEX IF NOT EXISTS idx_property_disputes_stage ON property_disputes(workflow_stage);
 
 -- 8. Internship Attendance Records
 CREATE TABLE IF NOT EXISTS internship_attendance (

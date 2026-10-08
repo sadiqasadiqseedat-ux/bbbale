@@ -315,11 +315,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateSection 
             {targetStaff && (
               <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 pt-1">
                 <div className="flex items-center space-x-3.5">
-                  <img
-                    src={targetStaff.photoUrl}
-                    alt={targetStaff.name}
-                    className="w-12 h-12 rounded-lg object-cover border border-slate-200 shadow-2xs shrink-0"
-                  />
+                  {targetStaff.photoUrl ? (
+                    <img
+                      src={targetStaff.photoUrl}
+                      alt={targetStaff.name}
+                      className="w-12 h-12 rounded-lg object-cover border border-slate-200 shadow-2xs shrink-0"
+                    />
+                  ) : (
+                    <div className="w-12 h-12 rounded-lg bg-amber-900/10 border border-amber-600/30 flex items-center justify-center text-amber-900 font-bold text-sm shrink-0 font-serif">
+                      {targetStaff.name.split(' ').map(n => n[0]).filter(Boolean).slice(0, 2).join('')}
+                    </div>
+                  )}
                   <div>
                     <h4 className="font-serif font-bold text-sm text-slate-950">
                       {targetStaff.name}
@@ -389,7 +395,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateSection 
                     }`}
                   >
                     <div className="flex items-center space-x-2 min-w-0">
-                      <img src={staff.photoUrl} alt={staff.name} className="w-7 h-7 rounded-full object-cover shrink-0" />
+                      {staff.photoUrl ? (
+                        <img src={staff.photoUrl} alt={staff.name} className="w-7 h-7 rounded-full object-cover shrink-0" />
+                      ) : (
+                        <div className="w-7 h-7 rounded-full bg-amber-900/10 border border-amber-600/30 flex items-center justify-center text-amber-900 font-bold text-[10px] shrink-0 font-serif">
+                          {staff.name.split(' ').map(n => n[0]).filter(Boolean).slice(0, 2).join('')}
+                        </div>
+                      )}
                       <div className="min-w-0">
                         <p className="text-xs font-bold text-slate-900 truncate">{staff.name}</p>
                         <p className="text-[10px] text-slate-500 truncate">{staff.title}</p>

@@ -307,11 +307,17 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
               key={counsel.id} 
               className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs flex items-start space-x-4 hover:border-slate-300 transition-colors"
             >
-              <img
-                src={counsel.photoUrl}
-                alt={counsel.name}
-                className="w-16 h-16 rounded-lg object-cover border border-slate-200 shrink-0"
-              />
+              {counsel.photoUrl ? (
+                <img
+                  src={counsel.photoUrl}
+                  alt={counsel.name}
+                  className="w-16 h-16 rounded-lg object-cover border border-slate-200 shrink-0"
+                />
+              ) : (
+                <div className="w-16 h-16 rounded-lg bg-amber-900/10 border border-amber-600/30 flex items-center justify-center text-amber-900 font-serif font-bold text-lg shrink-0">
+                  {counsel.name.split(' ').map(n => n[0]).filter(Boolean).slice(0, 2).join('')}
+                </div>
+              )}
               <div className="flex-1 min-w-0">
                 <div className="mb-1">{getStatusBadge(counsel.availability)}</div>
                 <h3 className="font-serif font-bold text-sm text-slate-950 truncate">{counsel.name}</h3>

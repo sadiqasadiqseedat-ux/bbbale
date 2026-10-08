@@ -624,7 +624,8 @@ CREATE TABLE IF NOT EXISTS correspondence (
   case_id TEXT,
   client_id TEXT,
   property_id TEXT,
-  logged_by_id TEXT NOT NULL
+  logged_by_id TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 -- 35. Chambers Appointments & Conferences
