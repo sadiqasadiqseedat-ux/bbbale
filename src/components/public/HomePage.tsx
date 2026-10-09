@@ -235,44 +235,50 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
 
       {/* Real Live Chambers Metric Counter */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="bg-slate-900 text-white rounded-2xl p-8 lg:p-12 shadow-xl border border-slate-800">
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-8 sm:p-10 lg:p-12 shadow-2xl border border-amber-500/30 text-white">
+          {/* Subtle gold gradient accent bar */}
+          <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-amber-600 via-amber-400 to-amber-600" />
+          
           <div className="text-center max-w-2xl mx-auto mb-10">
-            <span className="text-xs font-serif uppercase tracking-widest text-amber-400 font-bold">
-              Chambers Operational Scale
+            <span className="inline-flex items-center space-x-1.5 text-xs font-serif uppercase tracking-widest text-amber-400 font-bold bg-amber-400/10 px-3 py-1 rounded-full border border-amber-400/20">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+              <span>Chambers Operational Scale</span>
             </span>
-            <h2 className="text-2xl sm:text-3xl font-serif font-bold mt-2">
+            <h2 className="text-2xl sm:text-3xl font-serif font-bold mt-3 text-white">
               Integrated National Practice
             </h2>
-            <p className="text-xs sm:text-sm text-slate-400 mt-2">
+            <p className="text-xs sm:text-sm text-slate-300 mt-2">
               Live operational metrics maintained across our multi-branch infrastructure.
             </p>
           </div>
 
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-6 text-center divide-y lg:divide-y-0 lg:divide-x divide-slate-800">
-            <div className="pt-4 lg:pt-0">
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 lg:gap-6 text-center">
+            <div className="bg-slate-900/80 border border-slate-800/80 rounded-xl p-4 lg:p-5 hover:border-amber-500/40 transition-colors shadow-inner">
               <p className="text-3xl sm:text-4xl font-serif font-bold text-amber-400">{stats.activeBranches}</p>
-              <p className="text-xs text-slate-400 mt-1 uppercase font-semibold">Chambers Branches</p>
-              <p className="text-[11px] text-slate-500">Abuja · Lagos · Kano · PH</p>
+              <p className="text-xs text-slate-300 mt-1 uppercase font-semibold">Chambers Branches</p>
+              <p className="text-[11px] text-amber-300/80 font-mono mt-0.5 truncate">
+                {branches.length > 0 ? branches.map(b => b.code).join(' · ') : 'Abuja HQ'}
+              </p>
             </div>
-            <div className="pt-4 lg:pt-0">
+            <div className="bg-slate-900/80 border border-slate-800/80 rounded-xl p-4 lg:p-5 hover:border-amber-500/40 transition-colors shadow-inner">
               <p className="text-3xl sm:text-4xl font-serif font-bold text-white">{stats.mattersHandled}</p>
-              <p className="text-xs text-slate-400 mt-1 uppercase font-semibold">Active Legal Matters</p>
-              <p className="text-[11px] text-slate-500">Intake & Retainers</p>
+              <p className="text-xs text-slate-300 mt-1 uppercase font-semibold">Active Legal Matters</p>
+              <p className="text-[11px] text-slate-400 mt-0.5">Intake & Retainers</p>
             </div>
-            <div className="pt-4 lg:pt-0">
+            <div className="bg-slate-900/80 border border-slate-800/80 rounded-xl p-4 lg:p-5 hover:border-amber-500/40 transition-colors shadow-inner">
               <p className="text-3xl sm:text-4xl font-serif font-bold text-white">{stats.casesListed}</p>
-              <p className="text-xs text-slate-400 mt-1 uppercase font-semibold">Litigation Cases</p>
-              <p className="text-[11px] text-slate-500">Federal & State Dockets</p>
+              <p className="text-xs text-slate-300 mt-1 uppercase font-semibold">Litigation Cases</p>
+              <p className="text-[11px] text-slate-400 mt-0.5">Federal & State Dockets</p>
             </div>
-            <div className="pt-4 lg:pt-0">
+            <div className="bg-slate-900/80 border border-slate-800/80 rounded-xl p-4 lg:p-5 hover:border-amber-500/40 transition-colors shadow-inner">
               <p className="text-3xl sm:text-4xl font-serif font-bold text-white">{stats.propertiesManaged}</p>
-              <p className="text-xs text-slate-400 mt-1 uppercase font-semibold">Managed Properties</p>
-              <p className="text-[11px] text-slate-500">Commercial & Residential</p>
+              <p className="text-xs text-slate-300 mt-1 uppercase font-semibold">Managed Properties</p>
+              <p className="text-[11px] text-slate-400 mt-0.5">Commercial & Residential</p>
             </div>
-            <div className="pt-4 lg:pt-0 col-span-2 lg:col-span-1">
+            <div className="bg-slate-900/80 border border-slate-800/80 rounded-xl p-4 lg:p-5 hover:border-amber-500/40 transition-colors shadow-inner col-span-2 lg:col-span-1">
               <p className="text-3xl sm:text-4xl font-serif font-bold text-amber-400">{stats.studentsPlaced}</p>
-              <p className="text-xs text-slate-400 mt-1 uppercase font-semibold">Law Students Placed</p>
-              <p className="text-[11px] text-slate-500">Externships & Interns</p>
+              <p className="text-xs text-slate-300 mt-1 uppercase font-semibold">Law Students Placed</p>
+              <p className="text-[11px] text-slate-400 mt-0.5">Externships & Interns</p>
             </div>
           </div>
         </div>

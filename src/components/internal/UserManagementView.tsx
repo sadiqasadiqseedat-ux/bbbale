@@ -980,6 +980,11 @@ export const UserManagementView: React.FC = () => {
                         onChange={async e => {
                           const file = e.target.files?.[0];
                           if (!file) return;
+                          if (file.size > 5 * 1024 * 1024) {
+                            setFormError(`Image file (${(file.size / (1024 * 1024)).toFixed(1)}MB) exceeds the 5MB size limit.`);
+                            e.target.value = '';
+                            return;
+                          }
                           try {
                             const compressed = await processProfilePhoto(file);
                             setCreateForm(prev => ({
@@ -1277,6 +1282,11 @@ export const UserManagementView: React.FC = () => {
                         onChange={async e => {
                           const file = e.target.files?.[0];
                           if (!file) return;
+                          if (file.size > 5 * 1024 * 1024) {
+                            setFormError(`Image file (${(file.size / (1024 * 1024)).toFixed(1)}MB) exceeds the 5MB size limit.`);
+                            e.target.value = '';
+                            return;
+                          }
                           try {
                             const compressed = await processProfilePhoto(file);
                             setEditForm(prev => ({ ...prev, photoUrl: compressed }));

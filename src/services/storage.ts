@@ -460,7 +460,7 @@ async function apiFetch<T = any>(endpoint: string, options: RequestInit = {}): P
 function applyServerData(d: any) {
   if (!d) return;
 
-  if (Array.isArray(d.branches) && d.branches.length > 0) {
+  if (Array.isArray(d.branches)) {
     memory.branches = d.branches;
     setToStorage(STORAGE_KEYS.BRANCHES, d.branches);
   }
@@ -550,8 +550,16 @@ function applyServerData(d: any) {
     setToStorage(STORAGE_KEYS.STUDENTS, d.students);
   }
   if (Array.isArray(d.documents)) {
-    memory.documents = d.documents;
-    setToStorage(STORAGE_KEYS.DOCUMENTS, d.documents);
+    const mergedDocs = d.documents.map((serverDoc: any) => {
+      const existing = memory.documents.find(m => m.id === serverDoc.id || m.documentId === serverDoc.documentId);
+      return {
+        ...serverDoc,
+        fileDataUrl: serverDoc.fileDataUrl || serverDoc.fileUrl || existing?.fileDataUrl,
+        fileName: serverDoc.fileName || existing?.fileName || serverDoc.title
+      };
+    });
+    memory.documents = mergedDocs;
+    setToStorage(STORAGE_KEYS.DOCUMENTS, mergedDocs);
   }
   if (Array.isArray(d.legalResearch)) {
     memory.legalResearch = d.legalResearch;
@@ -561,9 +569,13 @@ function applyServerData(d: any) {
     memory.appointments = d.appointments;
     setToStorage(STORAGE_KEYS.APPOINTMENTS, d.appointments);
   }
-  if (Array.isArray(d.publicNotices) && d.publicNotices.length > 0) {
+  if (Array.isArray(d.publicNotices)) {
     memory.publicNotices = d.publicNotices;
     setToStorage(STORAGE_KEYS.PUBLIC_NOTICES, d.publicNotices);
+  }
+  if (Array.isArray(d.approvals)) {
+    memory.approvals = d.approvals;
+    setToStorage(STORAGE_KEYS.APPROVALS, d.approvals);
   }
   if (d.websiteContent) {
     memory.websiteContent = d.websiteContent;
@@ -1204,8 +1216,8 @@ export const storageService = {
     }).catch(err => console.error('Failed to update branch in D1:', err));
   },
   deleteBranch: async (branchId: string, actor: User): Promise<{ success: boolean; error?: string }> => {
-    if (actor.role !== 'PRINCIPAL_PARTNER') {
-      return { success: false, error: 'Unauthorized: Only the Principal Partner can delete branches.' };
+    if (actor.role !== 'PRINCIPAL_PARTNER' && actor.role !== 'HEAD_OF_CHAMBER' && actor.role !== 'ADMINISTRATOR_SECRETARY') {
+      return { success: false, error: 'Unauthorized: Only authorized leadership can delete branches.' };
     }
     if (branchId === 'br-abuja-01') {
       return { success: false, error: 'Protected Branch: Abuja Head Chambers is the permanent headquarters and cannot be deleted.' };
@@ -1576,8 +1588,8 @@ export const storageService = {
   },
 
   deleteMatter: async (matterId: string, actor: User): Promise<{ success: boolean; error?: string }> => {
-    if (actor.role !== 'PRINCIPAL_PARTNER' && actor.role !== 'HEAD_OF_CHAMBER') {
-      return { success: false, error: 'Unauthorized: Only Principal Partner or Head of Chamber can delete legal matters.' };
+    if (actor.role !== 'PRINCIPAL_PARTNER' && actor.role !== 'HEAD_OF_CHAMBER' && actor.role !== 'ADMINISTRATOR_SECRETARY') {
+      return { success: false, error: 'Unauthorized: Only authorized personnel can delete legal matters.' };
     }
     const target = memory.matters.find(m => m.id === matterId || m.matterId === matterId);
     if (!target) return { success: false, error: 'Matter not found' };
@@ -1649,8 +1661,8 @@ export const storageService = {
   },
 
   deleteCase: async (caseId: string, actor: User): Promise<{ success: boolean; error?: string }> => {
-    if (actor.role !== 'PRINCIPAL_PARTNER' && actor.role !== 'HEAD_OF_CHAMBER') {
-      return { success: false, error: 'Unauthorized: Only Principal Partner or Head of Chamber can delete litigation cases.' };
+    if (actor.role !== 'PRINCIPAL_PARTNER' && actor.role !== 'HEAD_OF_CHAMBER' && actor.role !== 'ADMINISTRATOR_SECRETARY') {
+      return { success: false, error: 'Unauthorized: Only authorized personnel can delete litigation cases.' };
     }
     const target = memory.cases.find(c => c.id === caseId || c.caseId === caseId);
     if (!target) return { success: false, error: 'Case not found' };
@@ -1803,7 +1815,7 @@ export const storageService = {
     const docCode = getNextNumber('document', 'DOC');
     const newDoc: DocumentRecord = {
       ...doc,
-      id: `doc-${Date.now()}`,
+      id: doc.id || `doc-${Date.now()}`,
       documentId: docCode,
       branchId: doc.branchId || actor.branchId || 'br-abuja-01',
       uploadDate: new Date().toISOString(),
@@ -1813,12 +1825,51 @@ export const storageService = {
     memory.documents = [newDoc, ...memory.documents];
     setToStorage(STORAGE_KEYS.DOCUMENTS, memory.documents);
     notifySubscribers();
+
+    apiFetch('/api/documents', {
+      method: 'POST',
+      body: JSON.stringify(newDoc)
+    }).catch(e => console.error('Failed saving document to D1:', e));
+
+    logAudit(actor, 'DEPOSIT_DOCUMENT', 'Document', newDoc.id, `Deposited legal document: ${newDoc.title} (${docCode})`);
     return newDoc;
   },
-  deleteDocument: (id: string, actor: User): void => {
-    memory.documents = memory.documents.filter(d => d.id !== id);
+  updateDocument: (doc: DocumentRecord, actor: User): void => {
+    memory.documents = memory.documents.map(d => d.id === doc.id ? doc : d);
     setToStorage(STORAGE_KEYS.DOCUMENTS, memory.documents);
     notifySubscribers();
+
+    apiFetch(`/api/documents/${encodeURIComponent(doc.id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(doc)
+    }).catch(e => console.error('Failed updating document in D1:', e));
+
+    logAudit(actor, 'UPDATE_DOCUMENT', 'Document', doc.id, `Updated document record: ${doc.title}`);
+  },
+  deleteDocument: async (id: string, actor: User): Promise<{ success: boolean; error?: string }> => {
+    if (actor.role !== 'PRINCIPAL_PARTNER' && actor.role !== 'HEAD_OF_CHAMBER' && actor.role !== 'ADMINISTRATOR_SECRETARY') {
+      return { success: false, error: 'Unauthorized: Only authorized personnel can delete document records.' };
+    }
+    const existing = memory.documents.find(d => d.id === id || d.documentId === id);
+    if (!existing) return { success: false, error: 'Document not found' };
+
+    try {
+      const res = await apiFetch<{ success: boolean; error?: string }>(`/api/documents/${encodeURIComponent(existing.id)}`, {
+        method: 'DELETE'
+      });
+      if (!res?.success) {
+        return { success: false, error: res?.error || 'Failed to delete document from Cloudflare D1.' };
+      }
+
+      memory.documents = memory.documents.filter(d => d.id !== existing.id && d.documentId !== existing.id);
+      setToStorage(STORAGE_KEYS.DOCUMENTS, memory.documents);
+      notifySubscribers();
+      logAudit(actor, 'DELETE_DOCUMENT', 'Document', existing.id, `Permanently deleted document: ${existing.title} (${existing.documentId})`);
+      return { success: true };
+    } catch (err: any) {
+      console.error('Error deleting document:', err);
+      return { success: false, error: err.message || 'Failed deleting document from D1' };
+    }
   },
 
   // Correspondence
@@ -2154,40 +2205,141 @@ export const storageService = {
     };
     memory.publicEnquiries = [newEnquiry, ...memory.publicEnquiries];
     setToStorage(STORAGE_KEYS.PUBLIC_ENQUIRIES, memory.publicEnquiries);
+
+    // Notify Administrator & Head of Chamber
+    storageService.addNotification({
+      targetRole: 'ADMINISTRATOR_SECRETARY',
+      title: 'New Public Communications Enquiry',
+      message: `${newEnquiry.fullName} submitted an enquiry: "${newEnquiry.subject || 'Public Registry message'}".`,
+      type: 'info',
+      linkAction: 'consultations'
+    });
+
     notifySubscribers();
     return newEnquiry;
   },
 
-  // Approvals
+  // Approvals & Special Authorizations
   getApprovals: (): ApprovalRequest[] => memory.approvals,
   requestApproval: (req: any, actor: User): ApprovalRequest => {
+    return storageService.requestSpecialApproval(req, actor);
+  },
+  requestSpecialApproval: (req: Partial<ApprovalRequest>, actor: User): ApprovalRequest => {
     const newReq: ApprovalRequest = {
-      ...req,
       id: `appr-${Date.now()}`,
-      status: 'PENDING_PRINCIPAL_PARTNER_APPROVAL',
+      requestType: req.requestType || 'Special Approval',
+      requesterId: actor.id,
+      requesterName: actor.name,
+      requesterRole: actor.role,
+      branchId: req.branchId || actor.branchId || 'br-abuja-01',
+      title: req.title || 'Special Approval Request',
+      description: req.description || '',
+      urgency: req.urgency || 'Normal',
+      referenceCode: req.referenceCode,
+      status: 'PENDING_HEAD_OF_CHAMBER',
       submittedAt: new Date().toISOString()
     };
     memory.approvals = [newReq, ...memory.approvals];
     setToStorage(STORAGE_KEYS.APPROVALS, memory.approvals);
+
+    // Create live notification for Head of Chamber
+    storageService.addNotification({
+      targetRole: 'HEAD_OF_CHAMBER',
+      title: 'New Special Approval Request',
+      message: `${actor.name} (${actor.role.replace(/_/g, ' ')}) has submitted an authorization request: "${newReq.title}".`,
+      type: newReq.urgency === 'Emergency / Critical' ? 'urgent' : 'warning',
+      linkAction: 'admin-approvals'
+    });
+
     notifySubscribers();
+
+    apiFetch('/api/approvals', {
+      method: 'POST',
+      body: JSON.stringify(newReq)
+    }).catch(e => console.error('Failed submitting approval to D1:', e));
+
+    logAudit(actor, 'SUBMIT_SPECIAL_APPROVAL', 'ApprovalRequest', newReq.id, `Submitted approval request: ${newReq.title}`);
     return newReq;
   },
-  decideApproval: (requestId: string, status: any, notes: string, actor: User): void => {
-    memory.approvals = memory.approvals.map(a => {
-      if (a.id === requestId) {
-        return {
-          ...a,
-          status,
-          decidedAt: new Date().toISOString(),
-          decidedById: actor.id,
-          decidedByName: actor.name,
-          decisionNotes: notes
-        };
-      }
-      return a;
-    });
+  forwardApprovalToPrincipalPartner: (requestId: string, forwardReason: string, actor: User): void => {
+    const existing = memory.approvals.find(a => a.id === requestId);
+    if (!existing) return;
+
+    const updated: ApprovalRequest = {
+      ...existing,
+      status: 'FORWARDED_TO_PRINCIPAL_PARTNER',
+      forwardedAt: new Date().toISOString(),
+      forwardedById: actor.id,
+      forwardedByName: actor.name,
+      forwardReason
+    };
+
+    memory.approvals = memory.approvals.map(a => a.id === requestId ? updated : a);
     setToStorage(STORAGE_KEYS.APPROVALS, memory.approvals);
+
+    // Notify Principal Partner
+    storageService.addNotification({
+      targetRole: 'PRINCIPAL_PARTNER',
+      title: 'Approval Forwarded: Beyond Head of Chamber Jurisdiction',
+      message: `${actor.name} forwarded request "${existing.title}" for Principal Partner SAN final sanction. Reason: ${forwardReason}`,
+      type: 'urgent',
+      linkAction: 'admin-approvals'
+    });
+
     notifySubscribers();
+
+    apiFetch(`/api/approvals/${encodeURIComponent(requestId)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ action: 'FORWARD_TO_PRINCIPAL_PARTNER', forwardReason })
+    }).catch(e => console.error('Failed forwarding approval in D1:', e));
+
+    logAudit(actor, 'FORWARD_APPROVAL', 'ApprovalRequest', requestId, `Escalated to Principal Partner: ${forwardReason}`);
+  },
+  decideApproval: (requestId: string, status: 'APPROVED' | 'REJECTED', notes: string, actor: User): void => {
+    const existing = memory.approvals.find(a => a.id === requestId);
+    if (!existing) return;
+
+    const updated: ApprovalRequest = {
+      ...existing,
+      status,
+      decidedAt: new Date().toISOString(),
+      decidedById: actor.id,
+      decidedByName: actor.name,
+      decisionNotes: notes
+    };
+
+    memory.approvals = memory.approvals.map(a => a.id === requestId ? updated : a);
+    setToStorage(STORAGE_KEYS.APPROVALS, memory.approvals);
+
+    // Notify Requester
+    storageService.addNotification({
+      userId: existing.requesterId,
+      title: `Special Approval ${status === 'APPROVED' ? 'Granted' : 'Declined'}`,
+      message: `Your request "${existing.title}" was ${status.toLowerCase()} by ${actor.name} (${actor.role.replace(/_/g, ' ')}). Notes: ${notes || 'No remarks provided.'}`,
+      type: status === 'APPROVED' ? 'success' : 'warning',
+      linkAction: 'admin-approvals'
+    });
+
+    notifySubscribers();
+
+    apiFetch(`/api/approvals/${encodeURIComponent(requestId)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ status, decisionNotes: notes })
+    }).catch(e => console.error('Failed deciding approval in D1:', e));
+
+    logAudit(actor, 'DECIDE_APPROVAL', 'ApprovalRequest', requestId, `Executive determination: ${status} by ${actor.name}`);
+  },
+  addNotification: (item: Omit<NotificationItem, 'id' | 'date' | 'isRead'>): NotificationItem => {
+    const newItem: NotificationItem = {
+      ...item,
+      id: `notif-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+      date: new Date().toISOString(),
+      isRead: false
+    };
+    memory.notifications = [newItem, ...memory.notifications];
+    setToStorage(STORAGE_KEYS.NOTIFICATIONS, memory.notifications);
+    notifySubscribers();
+    return newItem;
   },
 
   // Notifications & Audits

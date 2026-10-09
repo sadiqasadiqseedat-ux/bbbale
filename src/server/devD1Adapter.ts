@@ -50,6 +50,36 @@ export function createDevD1Database(dbFilePath: string = './.base44/chambers_d1_
       // Ignore if table does not exist
     }
 
+    // Ensure approvals table exists for hierarchical special approvals
+    try {
+      sqlite.exec(`
+        CREATE TABLE IF NOT EXISTS approvals (
+          id TEXT PRIMARY KEY,
+          request_type TEXT NOT NULL,
+          requester_id TEXT NOT NULL,
+          requester_name TEXT NOT NULL,
+          requester_role TEXT NOT NULL,
+          branch_id TEXT NOT NULL,
+          title TEXT NOT NULL,
+          description TEXT NOT NULL,
+          urgency TEXT NOT NULL DEFAULT 'Normal',
+          reference_code TEXT,
+          status TEXT NOT NULL DEFAULT 'PENDING_HEAD_OF_CHAMBER',
+          submitted_at TEXT NOT NULL,
+          forwarded_at TEXT,
+          forwarded_by_id TEXT,
+          forwarded_by_name TEXT,
+          forward_reason TEXT,
+          decided_at TEXT,
+          decided_by_id TEXT,
+          decided_by_name TEXT,
+          decision_notes TEXT
+        );
+      `);
+    } catch (err: any) {
+      console.warn('Approvals table init notice:', err.message);
+    }
+
     return {
       prepare(sql: string) {
         let boundParams: any[] = [];

@@ -15,7 +15,10 @@ import {
   ShieldAlert,
   ChevronRight,
   TrendingUp,
-  Scale
+  Scale,
+  Shield,
+  Send,
+  X
 } from 'lucide-react';
 import { storageService, subscribeToStore } from '../../services/storage';
 import { useAuth } from '../../context/AuthContext';
@@ -76,6 +79,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateSection 
   const [rejectingAssignmentId, setRejectingAssignmentId] = useState<string | null>(null);
   const [rejectionReason, setRejectionReason] = useState<CaseAssignment['rejectionReason']>('Existing workload');
   const [rejectionNotes, setRejectionNotes] = useState('');
+
+  // Special Approvals Workflow States
+  const [isSpecialApprovalModalOpen, setIsSpecialApprovalModalOpen] = useState(false);
+  const [specialApprovalForm, setSpecialApprovalForm] = useState({
+    title: '',
+    requestType: 'Special Approval' as ApprovalRequest['requestType'],
+    urgency: 'Normal' as NonNullable<ApprovalRequest['urgency']>,
+    referenceCode: '',
+    description: ''
+  });
+  const [approvalSubmitNotice, setApprovalSubmitNotice] = useState<string>('');
 
   const loadData = () => {
     const clients = storageService.getClients();
@@ -158,6 +172,31 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateSection 
     }
   };
 
+  const handleCreateSpecialApproval = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentUser || !specialApprovalForm.title.trim()) return;
+
+    storageService.requestSpecialApproval({
+      title: specialApprovalForm.title.trim(),
+      requestType: specialApprovalForm.requestType,
+      urgency: specialApprovalForm.urgency,
+      referenceCode: specialApprovalForm.referenceCode.trim() || undefined,
+      description: specialApprovalForm.description.trim(),
+      branchId: currentUser.branchId || 'br-abuja-01'
+    }, currentUser);
+
+    setSpecialApprovalForm({
+      title: '',
+      requestType: 'Special Approval',
+      urgency: 'Normal',
+      referenceCode: '',
+      description: ''
+    });
+    setIsSpecialApprovalModalOpen(false);
+    setApprovalSubmitNotice('Special approval request submitted directly to Head of Chamber. If beyond branch operational scope, it will be escalated to the Principal Partner.');
+    setTimeout(() => setApprovalSubmitNotice(''), 6000);
+  };
+
   const handleRespondAssignment = (assignmentId: string, status: 'ACCEPTED' | 'REJECTED') => {
     if (status === 'ACCEPTED') {
       storageService.respondToAssignment(assignmentId, 'ACCEPTED', undefined, undefined, currentUser || undefined);
@@ -182,6 +221,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateSection 
 
   return (
     <div className="space-y-6">
+      {approvalSubmitNotice && (
+        <div className="p-4 bg-emerald-50 border border-emerald-300 rounded-xl text-emerald-900 text-xs font-semibold flex items-center justify-between shadow-xs animate-in fade-in duration-200">
+          <div className="flex items-center space-x-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{approvalSubmitNotice}</span>
+          </div>
+          <button onClick={() => setApprovalSubmitNotice('')} className="text-emerald-700 hover:text-emerald-900 font-bold text-xs">✕</button>
+        </div>
+      )}
+
       {/* Header Banner - Distinct for each of the 5 Authorized Roles */}
       <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-xs flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
@@ -248,9 +297,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateSection 
         </div>
       </div>
 
-      {/* Live Real-Time Availability Switcher (Reflecting to Public Website) */}
+      {/* Live Real-Time Availability Switcher & Chamber Personnel Active Board */}
       {(() => {
-        const targetStaff = allStaff.find(u => u.id === selectedStaffId) || currentUser;
+        const userBranchId = currentUser?.branchId || 'br-abuja-01';
+        const branches = storageService.getBranches();
+        const activeChamber = branches.find(b => b.id === userBranchId);
+
+        // Enforce: User active board is seen only to those in the same chamber (or all if Principal Partner in ALL_BRANCHES mode)
+        const chamberStaff = allStaff.filter(u => {
+          if (isPrincipalPartner && isAllBranches) return true;
+          return (u.branchId || 'br-abuja-01') === userBranchId;
+        });
+
+        const targetStaff = chamberStaff.find(u => u.id === selectedStaffId) || currentUser;
+
         const handleSetAvailability = (st: AvailabilityStatus) => {
           if (!targetStaff || !currentUser) return;
           storageService.updateCounselAvailability(targetStaff.id, st, currentUser);
@@ -273,7 +333,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateSection 
                 <div>
                   <div className="flex items-center space-x-2">
                     <h3 className="font-serif font-bold text-sm sm:text-base text-slate-900">
-                      Counsel Real-Time Availability Control
+                      {isPrincipalPartner && isAllBranches ? 'National Chambers Live Availability Control' : `${activeChamber?.name || 'Chamber'} Personnel Active Board`}
                     </h3>
                     <span className="text-[10px] text-emerald-800 bg-emerald-100 border border-emerald-300 px-2 py-0.5 rounded-full font-bold flex items-center space-x-1">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse"></span>
@@ -281,7 +341,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateSection 
                     </span>
                   </div>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    Select any Chambers lawyer or yourself to update immediate court fixture or office engagement status shown on the public directory.
+                    {isPrincipalPartner && isAllBranches 
+                      ? 'National executive oversight of all counsel and advocates across Chambers branches.'
+                      : `Stationed active personnel within ${activeChamber?.name || 'same chamber'}. Only visible to colleagues in this chamber jurisdiction.`}
                   </p>
                 </div>
               </div>
@@ -289,14 +351,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateSection 
               {/* Personnel Selector Dropdown */}
               <div className="flex items-center space-x-2 w-full md:w-auto">
                 <label className="text-xs font-semibold text-slate-600 whitespace-nowrap">
-                  Selected Personnel:
+                  Selected Colleague:
                 </label>
                 <select
                   value={selectedStaffId || currentUser?.id || ''}
                   onChange={e => setSelectedStaffId(e.target.value)}
                   className="text-xs bg-slate-50 border border-slate-300 rounded-lg p-2 font-medium text-slate-900 focus:outline-hidden focus:border-amber-600 cursor-pointer w-full md:w-auto"
                 >
-                  {allStaff.map(u => (
+                  {chamberStaff.map(u => (
                     <option key={u.id} value={u.id}>
                       {u.name} ({u.role.replace(/_/g, ' ')}) — [{u.availability.replace(/_/g, ' ')}]
                     </option>
@@ -319,6 +381,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateSection 
                     <img
                       src={targetStaff.photoUrl}
                       alt={targetStaff.name}
+                      onError={e => {
+                        (e.target as HTMLElement).style.display = 'none';
+                      }}
                       className="w-12 h-12 rounded-lg object-cover border border-slate-200 shadow-2xs shrink-0"
                     />
                   ) : (
@@ -378,13 +443,21 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateSection 
               </div>
             )}
 
-            {/* Quick Counsel Overview Bar */}
+            {/* Quick Counsel Overview Bar - Chamber Scope Only */}
             <div className="pt-3 border-t border-slate-100">
-              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-2">
-                All Chambers Counsel Live Availability Board:
-              </span>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block">
+                  {isPrincipalPartner && isAllBranches 
+                    ? 'All Chambers Counsel Active Board' 
+                    : `${activeChamber?.name || 'Chamber'} Colleague Active Board (${chamberStaff.length} stationed personnel):`}
+                </span>
+                <span className="text-[10px] text-slate-400 font-medium">
+                  Visible to same-chamber members
+                </span>
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                {allStaff.filter(u => u.isPubliclyVisible).map(staff => (
+                {chamberStaff.filter(u => u.isActive).map(staff => (
                   <div
                     key={staff.id}
                     onClick={() => setSelectedStaffId(staff.id)}
@@ -396,7 +469,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateSection 
                   >
                     <div className="flex items-center space-x-2 min-w-0">
                       {staff.photoUrl ? (
-                        <img src={staff.photoUrl} alt={staff.name} className="w-7 h-7 rounded-full object-cover shrink-0" />
+                        <img 
+                          src={staff.photoUrl} 
+                          alt={staff.name} 
+                          onError={e => {
+                            (e.target as HTMLElement).style.display = 'none';
+                          }}
+                          className="w-7 h-7 rounded-full object-cover shrink-0" 
+                        />
                       ) : (
                         <div className="w-7 h-7 rounded-full bg-amber-900/10 border border-amber-600/30 flex items-center justify-center text-amber-900 font-bold text-[10px] shrink-0 font-serif">
                           {staff.name.split(' ').map(n => n[0]).filter(Boolean).slice(0, 2).join('')}
@@ -434,6 +514,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateSection 
         </div>
 
         <div className="flex flex-wrap items-center gap-2 text-xs">
+          {/* Universal Special Approval Request for All Staff */}
+          <button
+            onClick={() => setIsSpecialApprovalModalOpen(true)}
+            className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-semibold transition-colors flex items-center space-x-1 shadow-xs"
+            title="Submit a special approval request to Head of Chamber (escalatable to Principal Partner)"
+          >
+            <Shield className="w-3.5 h-3.5" />
+            <span>Special Approval Request</span>
+          </button>
           {isPrincipalPartner && (
             <>
               <button 
@@ -894,6 +983,140 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateSection 
                 Submit Rejection & Request Reassignment
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Special Approval Request Modal */}
+      {isSpecialApprovalModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full p-6 space-y-4 border border-slate-200 animate-in fade-in duration-200">
+            <div className="flex justify-between items-start pb-3 border-b border-slate-200">
+              <div className="flex items-center space-x-2.5">
+                <div className="w-9 h-9 rounded-lg bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-700">
+                  <Shield className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-serif font-bold text-base text-slate-900">
+                    Request Special Approval
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Submitted to Head of Chamber · Escalatable to Principal Partner
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setIsSpecialApprovalModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 text-lg"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-3 bg-amber-50/70 border border-amber-200 rounded-lg text-xs text-amber-900 space-y-1">
+              <p className="font-bold">Dual-Tier Chambers Authorization Workflow</p>
+              <p className="text-[11px] text-amber-800">
+                Your request is submitted first to the Head of Chamber. If the scope, expenditure, or legal implications exceed branch operational limits, the Head of Chamber will forward the docket to the Principal Partner, SAN for final executive determination.
+              </p>
+            </div>
+
+            <form onSubmit={handleCreateSpecialApproval} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Approval Request Title: *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={specialApprovalForm.title}
+                  onChange={e => setSpecialApprovalForm({ ...specialApprovalForm, title: e.target.value })}
+                  placeholder="e.g. Urgent Filing Fee Disbursement / Settlement Sanction"
+                  className="w-full text-xs p-2.5 rounded-lg border border-slate-300 focus:outline-hidden focus:border-amber-600"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Request Category:
+                  </label>
+                  <select
+                    value={specialApprovalForm.requestType}
+                    onChange={e => setSpecialApprovalForm({ ...specialApprovalForm, requestType: e.target.value as any })}
+                    className="w-full text-xs p-2.5 rounded-lg border border-slate-300 bg-white"
+                  >
+                    <option value="Special Approval">Special Approval</option>
+                    <option value="Head of Chamber Action">Head of Chamber Action</option>
+                    <option value="Emergency Chamber Expenditure">Emergency Chamber Expenditure</option>
+                    <option value="Settlement Proposal">Settlement Proposal</option>
+                    <option value="Fee Adjustment">Fee Adjustment</option>
+                    <option value="Notice of Premises">Notice of Premises</option>
+                    <option value="Public Content Publication">Public Content Publication</option>
+                    <option value="Invoice Billing Approval">Invoice Billing Approval</option>
+                    <option value="Litigation Strategy">Litigation Strategy</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Priority / Urgency:
+                  </label>
+                  <select
+                    value={specialApprovalForm.urgency}
+                    onChange={e => setSpecialApprovalForm({ ...specialApprovalForm, urgency: e.target.value as any })}
+                    className="w-full text-xs p-2.5 rounded-lg border border-slate-300 bg-white font-medium"
+                  >
+                    <option value="Normal">Normal</option>
+                    <option value="High">High Priority</option>
+                    <option value="Emergency / Critical">Emergency / Critical</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Related Matter / Case / Invoice Reference (optional):
+                </label>
+                <input
+                  type="text"
+                  value={specialApprovalForm.referenceCode}
+                  onChange={e => setSpecialApprovalForm({ ...specialApprovalForm, referenceCode: e.target.value })}
+                  placeholder="e.g. MAT-2026-001 or FHC/ABJ/CS/401/2026"
+                  className="w-full text-xs p-2.5 rounded-lg border border-slate-300 focus:outline-hidden focus:border-amber-600 font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Justification & Details: *
+                </label>
+                <textarea
+                  rows={4}
+                  required
+                  value={specialApprovalForm.description}
+                  onChange={e => setSpecialApprovalForm({ ...specialApprovalForm, description: e.target.value })}
+                  placeholder="State the circumstances, legal/financial rationale, and required executive action..."
+                  className="w-full text-xs p-2.5 rounded-lg border border-slate-300 focus:outline-hidden focus:border-amber-600 leading-relaxed"
+                />
+              </div>
+
+              <div className="flex justify-end space-x-2 pt-2 border-t border-slate-200">
+                <button
+                  type="button"
+                  onClick={() => setIsSpecialApprovalModalOpen(false)}
+                  className="px-4 py-2 border rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold shadow-xs flex items-center space-x-1.5 transition-colors"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  <span>Send to Head of Chamber</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

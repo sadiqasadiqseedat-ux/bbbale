@@ -100,7 +100,7 @@ export const InternalLayout: React.FC<InternalLayoutProps> = ({
     { id: 'internships', label: 'Law Student Internships', icon: GraduationCap, roles: ['PRINCIPAL_PARTNER', 'HEAD_OF_CHAMBER', 'ADMINISTRATOR_SECRETARY', 'COUNSEL_STAFF'] },
     { id: 'legal_research', label: 'Legal Research & Precedents', icon: BookOpen, roles: ['PRINCIPAL_PARTNER', 'HEAD_OF_CHAMBER', 'COUNSEL_STAFF'] },
     { id: 'documents', label: 'Document Repository', icon: FolderOpen, roles: ['PRINCIPAL_PARTNER', 'HEAD_OF_CHAMBER', 'ADMINISTRATOR_SECRETARY', 'ACCOUNT_OFFICER', 'COUNSEL_STAFF'] },
-    { id: 'administration', label: 'Administration & Audits', icon: Settings, roles: ['PRINCIPAL_PARTNER', 'HEAD_OF_CHAMBER'] },
+    { id: 'administration', label: 'Administration & Approvals', icon: Settings, roles: ['PRINCIPAL_PARTNER', 'HEAD_OF_CHAMBER', 'ADMINISTRATOR_SECRETARY'] },
     { id: 'cloudflare_d1', label: 'Cloudflare D1 Database', icon: Database, roles: ['PRINCIPAL_PARTNER', 'HEAD_OF_CHAMBER', 'ADMINISTRATOR_SECRETARY'] }
   ];
 

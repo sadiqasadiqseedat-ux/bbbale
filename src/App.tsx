@@ -53,7 +53,11 @@ function MainApp() {
   };
 
   const handleNavigateInternal = (section: string) => {
-    setInternalSection(section);
+    if (section === 'admin-approvals' || section === 'approvals') {
+      setInternalSection('administration');
+    } else {
+      setInternalSection(section);
+    }
     setIsInternalMode(true);
   };
 

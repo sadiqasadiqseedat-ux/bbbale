@@ -34,7 +34,8 @@ export const MattersAndCasesView: React.FC = () => {
     canAssignCases, 
     isCounselStaff, 
     isPrincipalPartner, 
-    isHeadOfChamber 
+    isHeadOfChamber,
+    isAdminSecretary 
   } = useAuth();
 
   const [activeTab, setActiveTab] = useState<'matters' | 'cases'>('cases');
@@ -52,7 +53,7 @@ export const MattersAndCasesView: React.FC = () => {
   const [printDoc, setPrintDoc] = useState<PrintableDocumentType | null>(null);
 
   // Deletion States & Authority Check
-  const canDeleteLitigation = isPrincipalPartner || isHeadOfChamber;
+  const canDeleteLitigation = isPrincipalPartner || isHeadOfChamber || isAdminSecretary;
   const [caseToDelete, setCaseToDelete] = useState<CaseRecord | null>(null);
   const [matterToDelete, setMatterToDelete] = useState<Matter | null>(null);
   const [isDeletingCase, setIsDeletingCase] = useState(false);

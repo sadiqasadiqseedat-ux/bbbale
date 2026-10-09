@@ -253,6 +253,8 @@ export interface DocumentRecord {
   fileUrl?: string;
   fileSize?: string;
   fileType?: string;
+  fileName?: string;
+  fileDataUrl?: string;
   uploadedById: string;
   uploadedByName: string;
   version: string;
@@ -637,18 +639,39 @@ export interface PublicEnquiry {
   createdAt: string;
 }
 
+export type ApprovalStatus = 
+  | 'PENDING_HEAD_OF_CHAMBER'
+  | 'FORWARDED_TO_PRINCIPAL_PARTNER'
+  | 'APPROVED'
+  | 'REJECTED'
+  | 'PENDING_PRINCIPAL_PARTNER_APPROVAL';
+
 export interface ApprovalRequest {
   id: string;
-  requestType: 'Head of Chamber Action' | 'Fee Adjustment' | 'Notice of Premises' | 'Settlement Proposal' | 'Public Content Publication' | 'Invoice Billing Approval';
+  requestType: 
+    | 'Special Approval'
+    | 'Head of Chamber Action' 
+    | 'Fee Adjustment' 
+    | 'Notice of Premises' 
+    | 'Settlement Proposal' 
+    | 'Public Content Publication' 
+    | 'Invoice Billing Approval'
+    | 'Litigation Strategy'
+    | 'Emergency Chamber Expenditure';
   requesterId: string;
   requesterName: string;
   requesterRole: UserRole;
   branchId: string;
   title: string;
   description: string;
+  urgency?: 'Normal' | 'High' | 'Emergency / Critical';
   referenceCode?: string;
-  status: 'PENDING_PRINCIPAL_PARTNER_APPROVAL' | 'APPROVED' | 'REJECTED';
+  status: ApprovalStatus;
   submittedAt: string;
+  forwardedAt?: string;
+  forwardedById?: string;
+  forwardedByName?: string;
+  forwardReason?: string;
   decidedAt?: string;
   decidedById?: string;
   decidedByName?: string;

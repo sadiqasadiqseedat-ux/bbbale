@@ -52,8 +52,16 @@ export const TrackingCentrePage: React.FC = () => {
   const handleReceiptUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    const ext = '.' + file.name.split('.').pop()?.toLowerCase();
+    const allowed = ['.pdf', '.jpg', '.jpeg', '.png'];
+    if (!allowed.includes(ext)) {
+      setPaymentError(`Invalid receipt format (${ext}). Permitted formats are PDF, JPG, and PNG.`);
+      e.target.value = '';
+      return;
+    }
     if (file.size > 5 * 1024 * 1024) {
-      setPaymentError('Receipt file must be 5MB or smaller.');
+      setPaymentError(`Receipt file (${(file.size / (1024 * 1024)).toFixed(1)}MB) exceeds the 5MB size limit.`);
+      e.target.value = '';
       return;
     }
     setPaymentError(null);

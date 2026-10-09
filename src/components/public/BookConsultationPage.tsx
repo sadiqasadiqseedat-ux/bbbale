@@ -69,11 +69,30 @@ export const BookConsultationPage: React.FC<BookConsultationPageProps> = ({ onNa
   const [showPaymentForm, setShowPaymentForm] = useState(false);
   const [paymentTxnRef, setPaymentTxnRef] = useState('');
   const [paymentSubmittedSuccess, setPaymentSubmittedSuccess] = useState(false);
+  const [fileUploadError, setFileUploadError] = useState<string | null>(null);
+
+  const ALLOWED_EXTENSIONS = ['.pdf', '.jpg', '.jpeg', '.png', '.doc', '.docx'];
+  const MAX_FILE_SIZE = 15 * 1024 * 1024; // 15MB
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setFileUploadError(null);
     if (e.target.files && e.target.files.length > 0) {
-      const names = Array.from(e.target.files).map(f => f.name);
-      setUploadedFiles(prev => [...prev, ...names]);
+      const validNames: string[] = [];
+      for (const file of Array.from(e.target.files)) {
+        const ext = '.' + file.name.split('.').pop()?.toLowerCase();
+        if (!ALLOWED_EXTENSIONS.includes(ext)) {
+          setFileUploadError(`Invalid format for "${file.name}". Permitted formats: PDF, JPEG, PNG, DOC/DOCX.`);
+          e.target.value = '';
+          return;
+        }
+        if (file.size > MAX_FILE_SIZE) {
+          setFileUploadError(`File "${file.name}" exceeds the 15MB size limit (${(file.size / (1024 * 1024)).toFixed(1)} MB).`);
+          e.target.value = '';
+          return;
+        }
+        validNames.push(file.name);
+      }
+      setUploadedFiles(prev => [...prev, ...validNames]);
     }
   };
 
@@ -506,13 +525,22 @@ export const BookConsultationPage: React.FC<BookConsultationPageProps> = ({ onNa
               <input
                 type="file"
                 multiple
+                accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
                 onChange={handleFileChange}
-                className="text-xs text-slate-600 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200"
+                className="text-xs text-slate-600 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200 cursor-pointer"
               />
+              <p className="text-[10px] text-slate-400 mt-1">
+                Accepted formats: PDF, JPEG, PNG, DOC/DOCX. Maximum size limit: 15MB per file.
+              </p>
+              {fileUploadError && (
+                <div className="mt-2 p-2.5 bg-rose-50 border border-rose-200 rounded-lg text-rose-800 text-xs font-medium">
+                  {fileUploadError}
+                </div>
+              )}
               {uploadedFiles.length > 0 && (
                 <div className="mt-2 space-y-1">
                   {uploadedFiles.map((fn, idx) => (
-                    <span key={idx} className="inline-block text-[11px] bg-slate-100 text-slate-700 px-2 py-0.5 rounded mr-2">
+                    <span key={idx} className="inline-block text-[11px] bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded mr-2 font-medium">
                       📎 {fn}
                     </span>
                   ))}

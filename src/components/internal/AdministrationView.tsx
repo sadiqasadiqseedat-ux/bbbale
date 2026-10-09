@@ -14,7 +14,11 @@ import {
   Scale,
   Edit3,
   Trash2,
-  X
+  X,
+  ArrowUpRight,
+  Send,
+  MessageSquare,
+  AlertTriangle
 } from 'lucide-react';
 import { storageService, subscribeToStore } from '../../services/storage';
 import { useAuth } from '../../context/AuthContext';
@@ -22,7 +26,8 @@ import { Branch, User, PublicNotice, AuditLog, ApprovalRequest } from '../../typ
 import { ConfirmDialog } from '../common/ConfirmDialog';
 
 export const AdministrationView: React.FC = () => {
-  const { currentUser, isPrincipalPartner } = useAuth();
+  const { currentUser, isPrincipalPartner, isHeadOfChamber, isAdminSecretary } = useAuth();
+  const canManageBranches = isPrincipalPartner || isHeadOfChamber || isAdminSecretary;
   const [activeTab, setActiveTab] = useState<'branches' | 'users' | 'notices' | 'approvals' | 'audits'>('branches');
 
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -30,6 +35,21 @@ export const AdministrationView: React.FC = () => {
   const [notices, setNotices] = useState<PublicNotice[]>([]);
   const [audits, setAudits] = useState<AuditLog[]>([]);
   const [approvals, setApprovals] = useState<ApprovalRequest[]>([]);
+
+  // Special Approvals Workflow States
+  const [isSpecialApprovalModalOpen, setIsSpecialApprovalModalOpen] = useState(false);
+  const [specialApprovalForm, setSpecialApprovalForm] = useState({
+    title: '',
+    requestType: 'Special Approval' as ApprovalRequest['requestType'],
+    urgency: 'Normal' as NonNullable<ApprovalRequest['urgency']>,
+    referenceCode: '',
+    description: ''
+  });
+  const [forwardingRequest, setForwardingRequest] = useState<ApprovalRequest | null>(null);
+  const [forwardReason, setForwardReason] = useState('');
+  const [decidingRequest, setDecidingRequest] = useState<ApprovalRequest | null>(null);
+  const [decidingStatus, setDecidingStatus] = useState<'APPROVED' | 'REJECTED'>('APPROVED');
+  const [decisionNotes, setDecisionNotes] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [branchActionError, setBranchActionError] = useState('');
   const [branchActionSuccess, setBranchActionSuccess] = useState('');
@@ -190,9 +210,55 @@ export const AdministrationView: React.FC = () => {
     }
   };
 
-  const handleDecideApproval = (reqId: string, status: 'APPROVED' | 'REJECTED') => {
-    if (!currentUser) return;
-    storageService.decideApproval(reqId, status, `Executive decision executed by ${currentUser.name}`, currentUser);
+  const handleOpenDecisionModal = (req: ApprovalRequest, status: 'APPROVED' | 'REJECTED') => {
+    setDecidingRequest(req);
+    setDecidingStatus(status);
+    setDecisionNotes('');
+  };
+
+  const handleExecuteDecision = () => {
+    if (!decidingRequest || !currentUser) return;
+    storageService.decideApproval(decidingRequest.id, decidingStatus, decisionNotes, currentUser);
+    setApprovals(storageService.getApprovals());
+    setDecidingRequest(null);
+  };
+
+  const handleOpenForwardModal = (req: ApprovalRequest) => {
+    setForwardingRequest(req);
+    setForwardReason('');
+  };
+
+  const handleExecuteForward = () => {
+    if (!forwardingRequest || !currentUser) return;
+    const reason = forwardReason.trim() || 'Matter scope and expenditure exceed Head of Chamber operational limit; escalated to Principal Partner for final determination.';
+    storageService.forwardApprovalToPrincipalPartner(forwardingRequest.id, reason, currentUser);
+    setApprovals(storageService.getApprovals());
+    setForwardingRequest(null);
+  };
+
+  const handleCreateSpecialApproval = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentUser || !specialApprovalForm.title.trim()) return;
+
+    storageService.requestSpecialApproval({
+      title: specialApprovalForm.title.trim(),
+      requestType: specialApprovalForm.requestType,
+      urgency: specialApprovalForm.urgency,
+      referenceCode: specialApprovalForm.referenceCode.trim() || undefined,
+      description: specialApprovalForm.description.trim(),
+      branchId: currentUser.branchId || 'br-abuja-01'
+    }, currentUser);
+
+    setIsSpecialApprovalModalOpen(false);
+    setSpecialApprovalForm({
+      title: '',
+      requestType: 'Special Approval',
+      urgency: 'Normal',
+      referenceCode: '',
+      description: ''
+    });
+    setApprovals(storageService.getApprovals());
+    setActiveTab('approvals');
   };
 
   const filteredAudits = audits.filter(a => 
@@ -210,12 +276,20 @@ export const AdministrationView: React.FC = () => {
             Chambers Administration, Branches & Audit Trail
           </h1>
           <p className="text-xs text-slate-500 mt-0.5">
-            Executive Governance · Branch Jurisdictions · Public Notice Board Manager · Immutable Audit Logs
+            Executive Governance · Branch Jurisdictions · Special Approval Delegations · Public Notice Board Manager · Immutable Audit Logs
           </p>
         </div>
 
-        <div className="flex items-center space-x-2">
-          {isPrincipalPartner && (
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => setIsSpecialApprovalModalOpen(true)}
+            className="px-3.5 py-2 bg-indigo-900 hover:bg-indigo-800 text-amber-300 rounded-lg text-xs font-bold shadow-xs flex items-center space-x-1.5 transition-colors"
+            title="Submit a special approval request to Head of Chamber"
+          >
+            <Send className="w-3.5 h-3.5 text-amber-300" />
+            <span>Send for Special Approval</span>
+          </button>
+          {(isPrincipalPartner || isHeadOfChamber) && (
             <button
               onClick={() => setIsAddBranchOpen(true)}
               className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-amber-400 rounded-lg text-xs font-bold shadow-xs flex items-center space-x-1.5 transition-colors"
@@ -310,7 +384,7 @@ export const AdministrationView: React.FC = () => {
                     <th className="p-3.5">Physical Address</th>
                     <th className="p-3.5">Phone & Official Email</th>
                     <th className="p-3.5">Status</th>
-                    {isPrincipalPartner && <th className="p-3.5 text-right">Actions (Principal Partner)</th>}
+                    {canManageBranches && <th className="p-3.5 text-right">Actions (Authorized)</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -329,7 +403,7 @@ export const AdministrationView: React.FC = () => {
                           {b.isActive ? 'Active Branch' : 'Inactive'}
                         </span>
                       </td>
-                      {isPrincipalPartner && (
+                      {canManageBranches && (
                         <td className="p-3.5 text-right space-x-1.5 whitespace-nowrap">
                           <button
                             onClick={() => handleOpenEditBranch(b)}
@@ -455,74 +529,189 @@ export const AdministrationView: React.FC = () => {
 
       {/* Approvals */}
       {activeTab === 'approvals' && (
-        <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-100 text-slate-700 font-bold uppercase border-b border-slate-200">
-                <tr>
-                  <th className="p-3.5">Request Type</th>
-                  <th className="p-3.5">Title & Description</th>
-                  <th className="p-3.5">Requester</th>
-                  <th className="p-3.5">Date Submitted</th>
-                  <th className="p-3.5">Status</th>
-                  <th className="p-3.5 text-right">Principal Partner Decision</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {approvals.length === 0 ? (
+        <div className="space-y-4">
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+            <div>
+              <h3 className="text-sm font-serif font-bold text-slate-900">
+                Special Executive Approval & Delegation Registry
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Personnel Submit → Head of Chamber Reviews & Determines (or Forwards if Beyond Branch Jurisdiction) → Principal Partner Sanctions
+              </p>
+            </div>
+            <button
+              onClick={() => setIsSpecialApprovalModalOpen(true)}
+              className="px-3.5 py-2 bg-indigo-900 hover:bg-indigo-800 text-amber-300 rounded-lg text-xs font-bold shadow-xs flex items-center space-x-1.5 transition-colors shrink-0"
+            >
+              <Plus className="w-3.5 h-3.5 text-amber-300" />
+              <span>New Approval Request</span>
+            </button>
+          </div>
+
+          <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-100 text-slate-700 font-bold uppercase border-b border-slate-200">
                   <tr>
-                    <td colSpan={6} className="p-8 text-center text-slate-400">
-                      No executive approval requests logged.
-                    </td>
+                    <th className="p-3.5">Request Type & Urgency</th>
+                    <th className="p-3.5">Title & Justification</th>
+                    <th className="p-3.5">Requester & Branch</th>
+                    <th className="p-3.5">Date Submitted</th>
+                    <th className="p-3.5">Status & Authority Chain</th>
+                    <th className="p-3.5 text-right">Executive Actions</th>
                   </tr>
-                ) : (
-                  approvals.map(appr => (
-                    <tr key={appr.id} className="hover:bg-slate-50">
-                      <td className="p-3.5 font-bold text-slate-900">{appr.requestType}</td>
-                      <td className="p-3.5">
-                        <p className="font-semibold text-slate-900">{appr.title}</p>
-                        <p className="text-[11px] text-slate-500">{appr.description}</p>
-                      </td>
-                      <td className="p-3.5 text-slate-700">
-                        {appr.requesterName} ({appr.requesterRole})
-                      </td>
-                      <td className="p-3.5 text-slate-600 font-mono">
-                        {new Date(appr.submittedAt).toLocaleDateString()}
-                      </td>
-                      <td className="p-3.5">
-                        <span className={`inline-block font-bold text-[10px] px-2 py-0.5 rounded ${
-                          appr.status === 'APPROVED' ? 'bg-emerald-100 text-emerald-800' :
-                          appr.status === 'REJECTED' ? 'bg-red-100 text-red-800' :
-                          'bg-amber-100 text-amber-800'
-                        }`}>
-                          {appr.status}
-                        </span>
-                      </td>
-                      <td className="p-3.5 text-right space-x-1">
-                        {appr.status === 'PENDING_PRINCIPAL_PARTNER_APPROVAL' && isPrincipalPartner ? (
-                          <>
-                            <button
-                              onClick={() => handleDecideApproval(appr.id, 'APPROVED')}
-                              className="px-2.5 py-1 bg-emerald-600 text-white rounded font-bold text-[11px]"
-                            >
-                              Approve
-                            </button>
-                            <button
-                              onClick={() => handleDecideApproval(appr.id, 'REJECTED')}
-                              className="px-2.5 py-1 bg-red-600 text-white rounded font-bold text-[11px]"
-                            >
-                              Reject
-                            </button>
-                          </>
-                        ) : (
-                          <span className="text-slate-400 font-mono text-[11px]">Decided</span>
-                        )}
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {approvals.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="p-8 text-center text-slate-400">
+                        No special approval requests logged. Use "New Approval Request" to submit to Head of Chamber.
                       </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                  ) : (
+                    approvals.map(appr => {
+                      const isPendingHoc = appr.status === 'PENDING_HEAD_OF_CHAMBER';
+                      const isForwarded = appr.status === 'FORWARDED_TO_PRINCIPAL_PARTNER';
+                      const isLegacyPending = appr.status === 'PENDING_PRINCIPAL_PARTNER_APPROVAL';
+                      const isPending = isPendingHoc || isForwarded || isLegacyPending;
+
+                      return (
+                        <tr key={appr.id} className="hover:bg-slate-50 transition-colors">
+                          <td className="p-3.5">
+                            <span className="font-bold text-slate-900 block">{appr.requestType}</span>
+                            {appr.urgency && (
+                              <span className={`inline-block text-[10px] font-semibold px-2 py-0.5 rounded mt-1 ${
+                                appr.urgency === 'Emergency / Critical'
+                                  ? 'bg-rose-100 text-rose-800 font-bold border border-rose-300'
+                                  : appr.urgency === 'High'
+                                  ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                                  : 'bg-slate-100 text-slate-700'
+                              }`}>
+                                {appr.urgency}
+                              </span>
+                            )}
+                            {appr.referenceCode && (
+                              <span className="text-[10px] font-mono text-slate-400 block mt-0.5">Ref: {appr.referenceCode}</span>
+                            )}
+                          </td>
+                          <td className="p-3.5 max-w-sm">
+                            <p className="font-semibold text-slate-900">{appr.title}</p>
+                            <p className="text-[11px] text-slate-600 line-clamp-2 mt-0.5">{appr.description}</p>
+                          </td>
+                          <td className="p-3.5 text-slate-700">
+                            <p className="font-semibold text-slate-900">{appr.requesterName}</p>
+                            <p className="text-[10px] text-slate-500">{appr.requesterRole.replace(/_/g, ' ')}</p>
+                          </td>
+                          <td className="p-3.5 text-slate-600 font-mono whitespace-nowrap">
+                            {new Date(appr.submittedAt).toLocaleDateString()}
+                          </td>
+                          <td className="p-3.5">
+                            {isPendingHoc && (
+                              <span className="inline-block font-bold text-[10px] px-2.5 py-1 rounded bg-amber-100 text-amber-900 border border-amber-300">
+                                ⏳ Pending Head of Chamber Review
+                              </span>
+                            )}
+                            {isForwarded && (
+                              <div className="space-y-1">
+                                <span className="inline-block font-bold text-[10px] px-2.5 py-1 rounded bg-purple-100 text-purple-900 border border-purple-300">
+                                  ▲ Escalated to Principal Partner (SAN)
+                                </span>
+                                {appr.forwardReason && (
+                                  <p className="text-[10px] text-purple-800 italic bg-purple-50 p-1.5 rounded border border-purple-200">
+                                    "{appr.forwardReason}" — {appr.forwardedByName || 'Head of Chamber'}
+                                  </p>
+                                )}
+                              </div>
+                            )}
+                            {isLegacyPending && (
+                              <span className="inline-block font-bold text-[10px] px-2.5 py-1 rounded bg-amber-100 text-amber-900 border border-amber-300">
+                                ⏳ Pending SAN Sanction
+                              </span>
+                            )}
+                            {appr.status === 'APPROVED' && (
+                              <div className="space-y-0.5">
+                                <span className="inline-block font-bold text-[10px] px-2.5 py-1 rounded bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                  ✓ Approved
+                                </span>
+                                {appr.decidedByName && (
+                                  <p className="text-[10px] text-slate-500">By {appr.decidedByName}</p>
+                                )}
+                                {appr.decisionNotes && (
+                                  <p className="text-[10px] text-slate-600 italic">"{appr.decisionNotes}"</p>
+                                )}
+                              </div>
+                            )}
+                            {appr.status === 'REJECTED' && (
+                              <div className="space-y-0.5">
+                                <span className="inline-block font-bold text-[10px] px-2.5 py-1 rounded bg-rose-100 text-rose-800 border border-rose-300">
+                                  ✕ Rejected
+                                </span>
+                                {appr.decidedByName && (
+                                  <p className="text-[10px] text-slate-500">By {appr.decidedByName}</p>
+                                )}
+                                {appr.decisionNotes && (
+                                  <p className="text-[10px] text-slate-600 italic">"{appr.decisionNotes}"</p>
+                                )}
+                              </div>
+                            )}
+                          </td>
+                          <td className="p-3.5 text-right space-x-1.5 whitespace-nowrap">
+                            {/* Head of Chamber Actions on PENDING_HEAD_OF_CHAMBER */}
+                            {isPendingHoc && (isHeadOfChamber || isPrincipalPartner) && (
+                              <>
+                                <button
+                                  onClick={() => handleOpenDecisionModal(appr, 'APPROVED')}
+                                  className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded font-bold text-[11px] shadow-xs"
+                                  title="Approve directly within Head of Chamber authority"
+                                >
+                                  Direct Approve
+                                </button>
+                                <button
+                                  onClick={() => handleOpenForwardModal(appr)}
+                                  className="px-2.5 py-1 bg-purple-700 hover:bg-purple-800 text-white rounded font-bold text-[11px] shadow-xs"
+                                  title="Forward to Principal Partner if beyond branch jurisdiction"
+                                >
+                                  Forward to SAN
+                                </button>
+                                <button
+                                  onClick={() => handleOpenDecisionModal(appr, 'REJECTED')}
+                                  className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded font-bold text-[11px] shadow-xs"
+                                >
+                                  Reject
+                                </button>
+                              </>
+                            )}
+
+                            {/* Principal Partner Action on FORWARDED_TO_PRINCIPAL_PARTNER or Legacy Pending */}
+                            {(isForwarded || isLegacyPending) && isPrincipalPartner && (
+                              <>
+                                <button
+                                  onClick={() => handleOpenDecisionModal(appr, 'APPROVED')}
+                                  className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded font-bold text-[11px] shadow-xs"
+                                  title="Grant SAN Final Sanction"
+                                >
+                                  SAN Final Approval
+                                </button>
+                                <button
+                                  onClick={() => handleOpenDecisionModal(appr, 'REJECTED')}
+                                  className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded font-bold text-[11px] shadow-xs"
+                                >
+                                  Reject
+                                </button>
+                              </>
+                            )}
+
+                            {!isPending && (
+                              <span className="text-slate-400 font-mono text-[11px]">Finalized</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}
@@ -874,6 +1063,241 @@ export const AdministrationView: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Submit Special Approval Modal */}
+      {isSpecialApprovalModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full p-6 space-y-4 border border-indigo-200">
+            <div className="flex justify-between items-center pb-2 border-b">
+              <div className="flex items-center space-x-2">
+                <Send className="w-5 h-5 text-indigo-700" />
+                <h3 className="font-serif font-bold text-base text-slate-900">
+                  Submit Special Approval Request
+                </h3>
+              </div>
+              <button 
+                onClick={() => setIsSpecialApprovalModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 text-lg"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-500">
+              This request will be routed immediately to the <strong>Head of Chamber</strong> for evaluation. If the subject matter exceeds branch operational authority, the Head of Chamber can escalate directly to the <strong>Principal Partner (SAN)</strong>.
+            </p>
+
+            <form onSubmit={handleCreateSpecialApproval} className="space-y-4 text-xs">
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Request Title: *</label>
+                <input
+                  type="text"
+                  required
+                  value={specialApprovalForm.title}
+                  onChange={e => setSpecialApprovalForm({ ...specialApprovalForm, title: e.target.value })}
+                  placeholder="e.g. Urgent Filing Fee Waiver / High Court Appellate Intervention"
+                  className="w-full p-2.5 rounded border border-slate-300 focus:outline-hidden focus:border-indigo-600"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Request Category: *</label>
+                  <select
+                    value={specialApprovalForm.requestType}
+                    onChange={e => setSpecialApprovalForm({ ...specialApprovalForm, requestType: e.target.value as any })}
+                    className="w-full p-2.5 rounded border border-slate-300 bg-white"
+                  >
+                    <option value="Special Approval">Special Approval</option>
+                    <option value="Head of Chamber Action">Head of Chamber Action</option>
+                    <option value="Fee Adjustment">Fee Adjustment</option>
+                    <option value="Notice of Premises">Notice of Premises</option>
+                    <option value="Settlement Proposal">Settlement Proposal</option>
+                    <option value="Public Content Publication">Public Content Publication</option>
+                    <option value="Invoice Billing Approval">Invoice Billing Approval</option>
+                    <option value="Litigation Strategy">Litigation Strategy</option>
+                    <option value="Emergency Chamber Expenditure">Emergency Chamber Expenditure</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Urgency Priority: *</label>
+                  <select
+                    value={specialApprovalForm.urgency}
+                    onChange={e => setSpecialApprovalForm({ ...specialApprovalForm, urgency: e.target.value as any })}
+                    className="w-full p-2.5 rounded border border-slate-300 bg-white"
+                  >
+                    <option value="Normal">Normal</option>
+                    <option value="High">High</option>
+                    <option value="Emergency / Critical">Emergency / Critical</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Case / Invoice / Matter Code (Optional):</label>
+                <input
+                  type="text"
+                  value={specialApprovalForm.referenceCode}
+                  onChange={e => setSpecialApprovalForm({ ...specialApprovalForm, referenceCode: e.target.value })}
+                  placeholder="e.g. FHC/ABJ/CS/402/2026 or BBC-MAT-2026-..."
+                  className="w-full p-2.5 rounded border border-slate-300 font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Detailed Justification & Background: *</label>
+                <textarea
+                  required
+                  rows={4}
+                  value={specialApprovalForm.description}
+                  onChange={e => setSpecialApprovalForm({ ...specialApprovalForm, description: e.target.value })}
+                  placeholder="Set out the background facts, financial amount, reason for urgency, and relief sought from Chamber leadership..."
+                  className="w-full p-2.5 rounded border border-slate-300 focus:outline-hidden focus:border-indigo-600"
+                />
+              </div>
+
+              <div className="flex justify-end space-x-2 pt-2 border-t">
+                <button
+                  type="button"
+                  onClick={() => setIsSpecialApprovalModalOpen(false)}
+                  className="px-4 py-2 border rounded font-semibold text-slate-700 hover:bg-slate-100"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-indigo-900 hover:bg-indigo-800 text-amber-300 rounded font-bold shadow-xs transition-colors"
+                >
+                  Submit to Head of Chamber
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Forward to Principal Partner Modal */}
+      {forwardingRequest && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full p-6 space-y-4 border border-purple-300">
+            <div className="flex justify-between items-center pb-2 border-b">
+              <div className="flex items-center space-x-2">
+                <ArrowUpRight className="w-5 h-5 text-purple-700" />
+                <h3 className="font-serif font-bold text-base text-slate-900">
+                  Escalate to Principal Partner (SAN)
+                </h3>
+              </div>
+              <button 
+                onClick={() => setForwardingRequest(null)}
+                className="text-slate-400 hover:text-slate-600 text-lg"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-3 bg-purple-50 rounded-lg text-xs space-y-1 text-purple-950">
+              <p><strong>Request:</strong> {forwardingRequest.title}</p>
+              <p><strong>Requester:</strong> {forwardingRequest.requesterName} ({forwardingRequest.requesterRole})</p>
+              <p className="text-[11px] text-purple-800">
+                As Head of Chamber, if this matter exceeds your branch delegation or financial jurisdiction, state the reasons below and escalate to the Principal Partner for final determination.
+              </p>
+            </div>
+
+            <div className="space-y-4 text-xs">
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Reason for Forwarding to Principal Partner: *
+                </label>
+                <textarea
+                  rows={4}
+                  value={forwardReason}
+                  onChange={e => setForwardReason(e.target.value)}
+                  placeholder="e.g. Involves constitutional settlement beyond branch threshold; requires Senior Advocate of Nigeria final sanction."
+                  className="w-full p-2.5 rounded border border-slate-300 focus:outline-hidden focus:border-purple-600"
+                />
+              </div>
+
+              <div className="flex justify-end space-x-2 pt-2 border-t">
+                <button
+                  type="button"
+                  onClick={() => setForwardingRequest(null)}
+                  className="px-4 py-2 border rounded font-semibold text-slate-700 hover:bg-slate-100"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExecuteForward}
+                  className="px-5 py-2 bg-purple-700 hover:bg-purple-800 text-white rounded font-bold shadow-xs transition-colors"
+                >
+                  Escalate to Principal Partner
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Record Executive Determination Modal */}
+      {decidingRequest && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full p-6 space-y-4 border border-slate-300">
+            <div className="flex justify-between items-center pb-2 border-b">
+              <h3 className="font-serif font-bold text-base text-slate-900">
+                Record Executive Determination
+              </h3>
+              <button 
+                onClick={() => setDecidingRequest(null)}
+                className="text-slate-400 hover:text-slate-600 text-lg"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className={`p-3 rounded-lg text-xs space-y-1 ${
+              decidingStatus === 'APPROVED' ? 'bg-emerald-50 text-emerald-950 border border-emerald-200' : 'bg-rose-50 text-rose-950 border border-rose-200'
+            }`}>
+              <p><strong>Action:</strong> {decidingStatus === 'APPROVED' ? 'Grant Approval' : 'Decline / Reject Request'}</p>
+              <p><strong>Target Request:</strong> {decidingRequest.title}</p>
+              <p><strong>Submitted By:</strong> {decidingRequest.requesterName}</p>
+            </div>
+
+            <div className="space-y-4 text-xs">
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Executive Notes & Direction:
+                </label>
+                <textarea
+                  rows={3}
+                  value={decisionNotes}
+                  onChange={e => setDecisionNotes(e.target.value)}
+                  placeholder="Provide remarks, conditions, or grounds for the decision..."
+                  className="w-full p-2.5 rounded border border-slate-300 focus:outline-hidden focus:border-amber-600"
+                />
+              </div>
+
+              <div className="flex justify-end space-x-2 pt-2 border-t">
+                <button
+                  type="button"
+                  onClick={() => setDecidingRequest(null)}
+                  className="px-4 py-2 border rounded font-semibold text-slate-700 hover:bg-slate-100"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExecuteDecision}
+                  className={`px-5 py-2 text-white rounded font-bold shadow-xs transition-colors ${
+                    decidingStatus === 'APPROVED' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-rose-600 hover:bg-rose-700'
+                  }`}
+                >
+                  Confirm {decidingStatus === 'APPROVED' ? 'Approval' : 'Rejection'}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

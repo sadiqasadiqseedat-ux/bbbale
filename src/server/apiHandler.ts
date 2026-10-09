@@ -561,6 +561,7 @@ export async function handleApiRequest(
       const appointments = await db.prepare('SELECT * FROM appointments ORDER BY date ASC').all<any>().catch(() => ({ results: [] }));
       const publicNotices = await db.prepare('SELECT * FROM public_notices ORDER BY publish_date DESC').all<any>();
       const publicEnquiries = await db.prepare('SELECT * FROM public_enquiries ORDER BY created_at DESC').all<any>().catch(() => ({ results: [] }));
+      const approvals = await db.prepare('SELECT * FROM approvals ORDER BY submitted_at DESC').all<any>().catch(() => ({ results: [] }));
       const websiteContent = await db.prepare("SELECT * FROM website_content WHERE id = 'cms-main'").first<any>();
       const auditLogs = await db.prepare('SELECT * FROM audit_logs ORDER BY timestamp DESC LIMIT 100').all<any>();
 
@@ -818,6 +819,8 @@ export async function handleApiRequest(
             entityType: d.entity_type,
             entityId: d.entity_id,
             fileUrl: d.file_url,
+            fileDataUrl: d.file_url,
+            fileName: d.file_name || d.title,
             fileSize: d.file_size,
             fileType: d.file_type,
             uploadedById: d.uploaded_by_id,
@@ -846,6 +849,28 @@ export async function handleApiRequest(
             publishedByName: pn.published_by_name
           })),
           publicEnquiries: publicEnquiries.results || [],
+          approvals: (approvals.results || []).map(a => ({
+            id: a.id,
+            requestType: a.request_type,
+            requesterId: a.requester_id,
+            requesterName: a.requester_name,
+            requesterRole: a.requester_role,
+            branchId: a.branch_id,
+            title: a.title,
+            description: a.description,
+            urgency: a.urgency,
+            referenceCode: a.reference_code,
+            status: a.status,
+            submittedAt: a.submitted_at,
+            forwardedAt: a.forwarded_at,
+            forwardedById: a.forwarded_by_id,
+            forwardedByName: a.forwarded_by_name,
+            forwardReason: a.forward_reason,
+            decidedAt: a.decided_at,
+            decidedById: a.decided_by_id,
+            decidedByName: a.decided_by_name,
+            decisionNotes: a.decision_notes
+          })),
           websiteContent: websiteContent ? {
             tagline: websiteContent.tagline,
             heroHeadline: websiteContent.hero_headline,
@@ -948,8 +973,8 @@ export async function handleApiRequest(
       if (!auth) {
         return errorResponse('Unauthorized: Valid personnel login required.', 401);
       }
-      if (auth.user.role !== 'PRINCIPAL_PARTNER') {
-        return errorResponse('Unauthorized: Only Principal Partner can delete branches.', 403);
+      if (auth.user.role !== 'PRINCIPAL_PARTNER' && auth.user.role !== 'HEAD_OF_CHAMBER' && auth.user.role !== 'ADMINISTRATOR_SECRETARY') {
+        return errorResponse('Unauthorized: Only authorized leadership can delete branches.', 403);
       }
       const branchId = path.replace('/api/branches/', '').trim();
       if (!branchId) return errorResponse('Branch ID is required.', 400);
@@ -960,6 +985,16 @@ export async function handleApiRequest(
 
       const existing = await db.prepare('SELECT id, name FROM branches WHERE id = ?').bind(branchId).first<any>();
       if (!existing) return errorResponse('Branch not found.', 404);
+
+      // Reassign any dependent records to permanent Abuja HQ to maintain referential integrity
+      await db.prepare('UPDATE users SET branch_id = "br-abuja-01" WHERE branch_id = ?').bind(branchId).run().catch(() => {});
+      await db.prepare('UPDATE matters SET branch_id = "br-abuja-01" WHERE branch_id = ?').bind(branchId).run().catch(() => {});
+      await db.prepare('UPDATE cases SET branch_id = "br-abuja-01" WHERE branch_id = ?').bind(branchId).run().catch(() => {});
+      await db.prepare('UPDATE court_diary SET branch_id = "br-abuja-01" WHERE branch_id = ?').bind(branchId).run().catch(() => {});
+      await db.prepare('UPDATE properties SET branch_id = "br-abuja-01" WHERE branch_id = ?').bind(branchId).run().catch(() => {});
+      await db.prepare('UPDATE consultations SET branch_id = "br-abuja-01" WHERE branch_id = ?').bind(branchId).run().catch(() => {});
+      await db.prepare('UPDATE students SET assigned_branch_id = "br-abuja-01" WHERE assigned_branch_id = ?').bind(branchId).run().catch(() => {});
+      await db.prepare('UPDATE documents SET branch_id = "br-abuja-01" WHERE branch_id = ?').bind(branchId).run().catch(() => {});
 
       await db.prepare('DELETE FROM branches WHERE id = ?').bind(branchId).run();
       await logAudit(db, auth.user.id, auth.user.name, auth.user.role, 'DELETE_BRANCH', 'Branch', branchId, `Permanently deleted branch: ${existing.name}`);
@@ -1540,8 +1575,8 @@ export async function handleApiRequest(
       if (!auth) {
         return errorResponse('Unauthorized: Valid personnel login required.', 401);
       }
-      if (auth.user.role !== 'PRINCIPAL_PARTNER' && auth.user.role !== 'HEAD_OF_CHAMBER') {
-        return errorResponse('Unauthorized: Only Principal Partner or Head of Chamber can delete legal matters.', 403);
+      if (auth.user.role !== 'PRINCIPAL_PARTNER' && auth.user.role !== 'HEAD_OF_CHAMBER' && auth.user.role !== 'ADMINISTRATOR_SECRETARY') {
+        return errorResponse('Unauthorized: Only authorized personnel can delete legal matters.', 403);
       }
       const matterId = path.replace('/api/matters/', '').trim();
       if (!matterId) return errorResponse('Matter ID is required.', 400);
@@ -1623,8 +1658,8 @@ export async function handleApiRequest(
       if (!auth) {
         return errorResponse('Unauthorized: Valid personnel login required.', 401);
       }
-      if (auth.user.role !== 'PRINCIPAL_PARTNER' && auth.user.role !== 'HEAD_OF_CHAMBER') {
-        return errorResponse('Unauthorized: Only Principal Partner or Head of Chamber can delete litigation cases.', 403);
+      if (auth.user.role !== 'PRINCIPAL_PARTNER' && auth.user.role !== 'HEAD_OF_CHAMBER' && auth.user.role !== 'ADMINISTRATOR_SECRETARY') {
+        return errorResponse('Unauthorized: Only authorized personnel can delete litigation cases.', 403);
       }
       const caseId = path.replace('/api/cases/', '').trim();
       if (!caseId) return errorResponse('Case ID is required.', 400);
@@ -1843,6 +1878,245 @@ export async function handleApiRequest(
 
         return jsonResponse({ success: true, quitNoticeId, id });
       }
+    }
+
+    // --------------------------------------------------------------------------
+    // 8B. LEGAL DOCUMENTS & REPOSITORY (PERSISTENT CLOUDFLARE D1 STORAGE)
+    // --------------------------------------------------------------------------
+    if (path === '/api/documents') {
+      if (request.method === 'GET') {
+        const rows = await db.prepare('SELECT * FROM documents ORDER BY upload_date DESC').all<any>();
+        return jsonResponse({
+          success: true,
+          documents: (rows.results || []).map(d => ({
+            ...d,
+            documentId: d.document_id,
+            branchId: d.branch_id,
+            entityType: d.entity_type,
+            entityId: d.entity_id,
+            fileUrl: d.file_url,
+            fileDataUrl: d.file_url,
+            fileName: d.file_name || d.title,
+            fileSize: d.file_size,
+            fileType: d.file_type,
+            uploadedById: d.uploaded_by_id,
+            uploadedByName: d.uploaded_by_name,
+            uploadDate: d.upload_date,
+            isClientVisible: Boolean(d.is_client_visible),
+            googleDriveLink: d.google_drive_link
+          }))
+        });
+      }
+
+      if (request.method === 'POST') {
+        const auth = await getAuthUser(request, db);
+        if (!auth) {
+          return errorResponse('Unauthorized: Valid personnel login required to deposit legal documents.', 401);
+        }
+        const body = await request.json() as any;
+        const documentId = body.documentId || await getNextNumber(db, 'document', 'DOC');
+        const id = body.id || `doc-${Date.now()}`;
+        const uploadDate = body.uploadDate || new Date().toISOString();
+
+        await db.prepare(
+          `INSERT INTO documents 
+           (id, document_id, title, branch_id, category, entity_type, entity_id, file_url, file_size, file_type, uploaded_by_id, uploaded_by_name, version, upload_date, is_client_visible, notes, google_drive_link)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).bind(
+          id, documentId, body.title || 'Untitled Document',
+          body.branchId || auth.user.branchId || 'br-abuja-01',
+          body.category || 'Other',
+          body.entityType || null, body.entityId || null,
+          body.fileUrl || body.fileDataUrl || null,
+          body.fileSize || '', body.fileType || '',
+          auth.user.id, auth.user.name,
+          body.version || '1.0', uploadDate,
+          body.isClientVisible ? 1 : 0,
+          body.notes || '', body.googleDriveLink || null
+        ).run();
+
+        await logAudit(db, auth.user.id, auth.user.name, auth.user.role, 'DEPOSIT_DOCUMENT', 'Document', id, `Deposited legal document: ${body.title} (${documentId})`);
+        return jsonResponse({
+          success: true,
+          document: {
+            id,
+            documentId,
+            title: body.title,
+            category: body.category,
+            version: body.version || '1.0',
+            uploadDate,
+            uploadedById: auth.user.id,
+            uploadedByName: auth.user.name,
+            isClientVisible: Boolean(body.isClientVisible),
+            notes: body.notes,
+            googleDriveLink: body.googleDriveLink
+          }
+        });
+      }
+    }
+
+    if (path.startsWith('/api/documents/') && request.method === 'PUT') {
+      const auth = await getAuthUser(request, db);
+      if (!auth) {
+        return errorResponse('Unauthorized: Valid personnel login required.', 401);
+      }
+      const docId = path.replace('/api/documents/', '').trim();
+      if (!docId) return errorResponse('Document ID required.', 400);
+      const body = await request.json() as any;
+
+      await db.prepare(
+        `UPDATE documents 
+         SET title = ?, category = ?, version = ?, is_client_visible = ?, notes = ?, google_drive_link = ?,
+             file_url = COALESCE(?, file_url), file_size = COALESCE(?, file_size), file_type = COALESCE(?, file_type)
+         WHERE id = ? OR document_id = ?`
+      ).bind(
+        body.title || '', body.category || '', body.version || '1.0',
+        body.isClientVisible ? 1 : 0, body.notes || '', body.googleDriveLink || null,
+        body.fileUrl || body.fileDataUrl || null, body.fileSize || null, body.fileType || null,
+        docId, docId
+      ).run();
+
+      await logAudit(db, auth.user.id, auth.user.name, auth.user.role, 'UPDATE_DOCUMENT', 'Document', docId, `Updated document: ${body.title || docId}`);
+      return jsonResponse({ success: true, message: 'Document updated successfully.' });
+    }
+
+    if (path.startsWith('/api/documents/') && request.method === 'DELETE') {
+      const auth = await getAuthUser(request, db);
+      if (!auth) {
+        return errorResponse('Unauthorized: Valid personnel login required.', 401);
+      }
+      if (auth.user.role !== 'PRINCIPAL_PARTNER' && auth.user.role !== 'HEAD_OF_CHAMBER' && auth.user.role !== 'ADMINISTRATOR_SECRETARY') {
+        return errorResponse('Unauthorized: Only authorized personnel can delete documents.', 403);
+      }
+      const docId = path.replace('/api/documents/', '').trim();
+      if (!docId) return errorResponse('Document ID required.', 400);
+
+      const existing = await db.prepare('SELECT id, document_id, title FROM documents WHERE id = ? OR document_id = ?').bind(docId, docId).first<any>();
+      if (!existing) return errorResponse('Document not found.', 404);
+
+      await db.prepare('DELETE FROM documents WHERE id = ?').bind(existing.id).run();
+      await logAudit(db, auth.user.id, auth.user.name, auth.user.role, 'DELETE_DOCUMENT', 'Document', existing.id, `Permanently deleted document: ${existing.title} (${existing.document_id})`);
+      return jsonResponse({ success: true, message: `Document ${existing.title} permanently deleted.` });
+    }
+
+    // --------------------------------------------------------------------------
+    // 8C. PUBLIC NOTICES (D1 PERSISTENCE)
+    // --------------------------------------------------------------------------
+    if (path === '/api/public-notices') {
+      if (request.method === 'GET') {
+        const rows = await db.prepare('SELECT * FROM public_notices ORDER BY publish_date DESC').all<any>();
+        return jsonResponse({ success: true, publicNotices: rows.results || [] });
+      }
+
+      if (request.method === 'POST') {
+        const auth = await getAuthUser(request, db);
+        if (!auth) {
+          return errorResponse('Unauthorized: Valid personnel login required.', 401);
+        }
+        const body = await request.json() as any;
+        const id = body.id || `not-${Date.now()}`;
+        const publishDate = body.publishDate || new Date().toISOString().split('T')[0];
+
+        await db.prepare(
+          `INSERT INTO public_notices (id, title, category, content, publish_date, expiry_date, status, published_by_id, published_by_name)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).bind(
+          id, body.title, body.category, body.content, publishDate,
+          body.expiryDate || null, body.status || 'Published',
+          auth.user.id, auth.user.name
+        ).run();
+
+        await logAudit(db, auth.user.id, auth.user.name, auth.user.role, 'CREATE_NOTICE', 'PublicNotice', id, `Published notice: ${body.title}`);
+        return jsonResponse({ success: true, id });
+      }
+    }
+
+    if (path.startsWith('/api/public-notices/') && request.method === 'DELETE') {
+      const auth = await getAuthUser(request, db);
+      if (!auth) {
+        return errorResponse('Unauthorized: Valid personnel login required.', 401);
+      }
+      if (auth.user.role !== 'PRINCIPAL_PARTNER' && auth.user.role !== 'HEAD_OF_CHAMBER' && auth.user.role !== 'ADMINISTRATOR_SECRETARY') {
+        return errorResponse('Unauthorized to delete public notices.', 403);
+      }
+      const noticeId = path.replace('/api/public-notices/', '').trim();
+      await db.prepare('DELETE FROM public_notices WHERE id = ?').bind(noticeId).run();
+      await logAudit(db, auth.user.id, auth.user.name, auth.user.role, 'DELETE_NOTICE', 'PublicNotice', noticeId, `Deleted notice: ${noticeId}`);
+      return jsonResponse({ success: true });
+    }
+
+    // --------------------------------------------------------------------------
+    // 8D. SPECIAL APPROVAL WORKFLOW (MULTI-LEVEL: STAFF -> HOC -> PRINCIPAL PARTNER)
+    // --------------------------------------------------------------------------
+    if (path === '/api/approvals') {
+      if (request.method === 'GET') {
+        const rows = await db.prepare('SELECT * FROM approvals ORDER BY submitted_at DESC').all<any>().catch(() => ({ results: [] }));
+        return jsonResponse({ success: true, approvals: rows.results || [] });
+      }
+
+      if (request.method === 'POST') {
+        const auth = await getAuthUser(request, db);
+        if (!auth) {
+          return errorResponse('Unauthorized: Valid personnel login required.', 401);
+        }
+        const body = await request.json() as any;
+        const id = body.id || `appr-${Date.now()}`;
+        const submittedAt = body.submittedAt || new Date().toISOString();
+
+        await db.prepare(
+          `INSERT INTO approvals 
+           (id, request_type, requester_id, requester_name, requester_role, branch_id, title, description, urgency, reference_code, status, submitted_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING_HEAD_OF_CHAMBER', ?)`
+        ).bind(
+          id, body.requestType || 'Special Approval',
+          auth.user.id, auth.user.name, auth.user.role,
+          body.branchId || auth.user.branchId || 'br-abuja-01',
+          body.title || 'Special Approval Request',
+          body.description || '', body.urgency || 'Normal',
+          body.referenceCode || null, submittedAt
+        ).run().catch(err => {
+          console.warn('Approvals insert warning:', err.message);
+        });
+
+        await logAudit(db, auth.user.id, auth.user.name, auth.user.role, 'SUBMIT_SPECIAL_APPROVAL', 'ApprovalRequest', id, `Submitted special approval: ${body.title}`);
+        return jsonResponse({ success: true, id, status: 'PENDING_HEAD_OF_CHAMBER' });
+      }
+    }
+
+    if (path.startsWith('/api/approvals/') && request.method === 'PUT') {
+      const auth = await getAuthUser(request, db);
+      if (!auth) {
+        return errorResponse('Unauthorized: Valid personnel login required.', 401);
+      }
+      const approvalId = path.replace('/api/approvals/', '').trim();
+      const body = await request.json() as any;
+
+      if (body.action === 'FORWARD_TO_PRINCIPAL_PARTNER') {
+        if (auth.user.role !== 'HEAD_OF_CHAMBER' && auth.user.role !== 'PRINCIPAL_PARTNER') {
+          return errorResponse('Only Head of Chamber can forward approvals to Principal Partner.', 403);
+        }
+        await db.prepare(
+          `UPDATE approvals 
+           SET status = 'FORWARDED_TO_PRINCIPAL_PARTNER', forwarded_at = datetime('now'), forwarded_by_id = ?, forwarded_by_name = ?, forward_reason = ?
+           WHERE id = ?`
+        ).bind(auth.user.id, auth.user.name, body.forwardReason || 'Beyond Branch Control / Escalated to Principal Partner', approvalId).run().catch(() => {});
+
+        await logAudit(db, auth.user.id, auth.user.name, auth.user.role, 'FORWARD_APPROVAL', 'ApprovalRequest', approvalId, `Forwarded to Principal Partner: ${body.forwardReason || ''}`);
+        return jsonResponse({ success: true, status: 'FORWARDED_TO_PRINCIPAL_PARTNER' });
+      }
+
+      if (body.status === 'APPROVED' || body.status === 'REJECTED') {
+        await db.prepare(
+          `UPDATE approvals 
+           SET status = ?, decided_at = datetime('now'), decided_by_id = ?, decided_by_name = ?, decision_notes = ?
+           WHERE id = ?`
+        ).bind(body.status, auth.user.id, auth.user.name, body.decisionNotes || '', approvalId).run().catch(() => {});
+
+        await logAudit(db, auth.user.id, auth.user.name, auth.user.role, 'DECIDE_APPROVAL', 'ApprovalRequest', approvalId, `Executive Decision: ${body.status}`);
+        return jsonResponse({ success: true, status: body.status });
+      }
+
+      return jsonResponse({ success: true });
     }
 
     // --------------------------------------------------------------------------
