@@ -26,11 +26,16 @@ import {
   AuditLog, 
   Branch 
 } from '../types';
-import { hashPassword, verifyPassword, generateSalt, generateSecureToken, validatePasswordStrength } from '../services/crypto';
+import { hashPassword, verifyPassword, generateSalt, generateSecureToken, validatePasswordStrength, needsHashUpgrade } from '../services/crypto';
+import {
+  isFirmAdmin, canManageUsers, canManageWebsite, canAssignCases,
+  canVerifyPayments, canManageBilling, isPersonnel, getBranchFilter,
+  filterByBranch, branchFilterClause, MAX_FAILED_LOGIN_ATTEMPTS, LOGIN_LOCKOUT_MINUTES
+} from './auth';
 
 const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, PATCH, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
   'Content-Type': 'application/json'
 };
@@ -390,19 +395,36 @@ export async function handleApiRequest(
         return errorResponse('Account is deactivated. Please consult Chambers Administration.', 403);
       }
 
-      // Verify password
+      // Check for account lockout due to excessive failed attempts
+      if (userRow.failed_login_attempts >= MAX_FAILED_LOGIN_ATTEMPTS) {
+        const lastLoginAttempt = userRow.last_login;
+        if (lastLoginAttempt) {
+          const lockoutExpiry = new Date(lastLoginAttempt).getTime() + (LOGIN_LOCKOUT_MINUTES * 60 * 1000);
+          if (Date.now() < lockoutExpiry) {
+            return errorResponse(`Account temporarily locked due to multiple failed attempts. Please try again in ${LOGIN_LOCKOUT_MINUTES} minutes or contact the Principal Partner.`, 429);
+          }
+          // Reset counter after lockout period expires
+          await db.prepare('UPDATE users SET failed_login_attempts = 0 WHERE id = ?').bind(userRow.id).run();
+        }
+      }
+
+      // Verify password (supports both new PBKDF2 and legacy SHA-256 hashes)
       let isPasswordValid = await verifyPassword(password, userRow.salt, userRow.password_hash);
-      
-      // Initial bootstrap fallback: if user requires password change and uses default admin@2026
-      if (!isPasswordValid && userRow.requires_password_change && password === 'admin@2026') {
-        isPasswordValid = true;
-        const newHash = await hashPassword('admin@2026', userRow.salt);
-        await db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').bind(newHash, userRow.id).run();
+
+      // SECURITY FIX: The old admin@2026 bootstrap bypass has been removed.
+      // Users with requires_password_change=1 must authenticate with their actual password,
+      // then change it. New seeded accounts use PBKDF2-hashed admin@2026 as their initial password.
+
+      // Transparently upgrade legacy SHA-256 hashes to PBKDF2 on successful login
+      if (isPasswordValid && needsHashUpgrade(userRow.password_hash)) {
+        const newSalt = generateSalt();
+        const newHash = await hashPassword(password, newSalt);
+        await db.prepare('UPDATE users SET password_hash = ?, salt = ? WHERE id = ?').bind(newHash, newSalt, userRow.id).run();
       }
 
       if (!isPasswordValid) {
         await db.prepare(
-          'UPDATE users SET failed_login_attempts = failed_login_attempts + 1 WHERE id = ?'
+          "UPDATE users SET failed_login_attempts = failed_login_attempts + 1, last_login = datetime('now') WHERE id = ?"
         ).bind(userRow.id).run();
         await logAudit(db, userRow.id, userRow.name, userRow.role, 'LOGIN_FAILED', 'User', userRow.id, 'Incorrect password');
         return errorResponse('Invalid username/email or password.', 401);
@@ -516,36 +538,153 @@ export async function handleApiRequest(
       return jsonResponse({ success: true, message: 'Password updated successfully' });
     }
 
+    // Admin-initiated password reset (Principal Partner or Head of Chamber only)
+    if (path === '/api/auth/admin-reset-password' && request.method === 'POST') {
+      const auth = await getAuthUser(request, db);
+      if (!auth) return errorResponse('Unauthorized', 401);
+      if (!canManageUsers(auth.user)) {
+        return errorResponse('Forbidden: Only Principal Partner or Head of Chamber can reset user passwords.', 403);
+      }
+
+      const body = await request.json() as any;
+      const { targetUserId, temporaryPassword } = body;
+
+      if (!targetUserId || !temporaryPassword) {
+        return errorResponse('Target user ID and temporary password are required.', 400);
+      }
+
+      const targetUser = await db.prepare('SELECT id, name, role FROM users WHERE id = ?').bind(targetUserId).first<any>();
+      if (!targetUser) return errorResponse('Target user not found.', 404);
+
+      // Principal Partner account can only be reset by the Principal Partner themselves
+      if (targetUser.role === 'PRINCIPAL_PARTNER' && auth.user.role !== 'PRINCIPAL_PARTNER') {
+        return errorResponse('Forbidden: Only the Principal Partner can reset their own credentials.', 403);
+      }
+
+      const strength = validatePasswordStrength(temporaryPassword);
+      if (!strength.isValid) {
+        return errorResponse('Temporary password does not meet strength requirements: ' + strength.errors[0], 400);
+      }
+
+      const newSalt = generateSalt();
+      const newHash = await hashPassword(temporaryPassword, newSalt);
+
+      await db.prepare(
+        `UPDATE users 
+         SET salt = ?, password_hash = ?, requires_password_change = 1, 
+             account_status = 'Password Reset Required', password_changed_at = datetime('now')
+         WHERE id = ?`
+      ).bind(newSalt, newHash, targetUserId).run();
+
+      // Invalidate all existing sessions for the target user
+      await db.prepare('DELETE FROM user_sessions WHERE user_id = ?').bind(targetUserId).run().catch(() => {});
+
+      await logAudit(db, auth.user.id, auth.user.name, auth.user.role, 'ADMIN_PASSWORD_RESET', 'User', targetUserId, `Reset password for ${targetUser.name}`);
+      return jsonResponse({ success: true, message: 'Password reset successfully. User must change password on next login.' });
+    }
+
     // --------------------------------------------------------------------------
-    // 3. MULTI-DEVICE FULL SYNC
+    // 3. MULTI-DEVICE FULL SYNC (AUTHENTICATED & ROLE-FILTERED)
     // --------------------------------------------------------------------------
     if (path === '/api/sync' && request.method === 'GET') {
-      const branches = await db.prepare('SELECT * FROM branches WHERE is_active = 1').all<any>();
-      const users = await db.prepare('SELECT id, username, name, email, phone, role, branch_id, title, practice_areas, bio, photo_url, availability, is_publicly_visible, is_active, account_status, requires_password_change, created_at FROM users').all<any>();
+      // SECURITY FIX: /api/sync now requires authentication
+      const auth = await getAuthUser(request, db);
+      if (!auth) {
+        return errorResponse('Unauthorized: Valid personnel login required to sync data.', 401);
+      }
+
+      const branchFilter = getBranchFilter(auth.user);
+
+      // Build branch-filtered WHERE clause for queries that have branch_id
+      const bf = branchFilter ? `WHERE branch_id = ?` : '';
+      const bfParams = branchFilter ? [branchFilter] : [];
+
+      // Branches: all active branches for PRINCIPAL_PARTNER, own branch only for others
+      const branchesQuery = branchFilter
+        ? 'SELECT * FROM branches WHERE is_active = 1 AND id = ?'
+        : 'SELECT * FROM branches WHERE is_active = 1';
+      const branches = branchFilter
+        ? await db.prepare(branchesQuery).bind(branchFilter).all<any>()
+        : await db.prepare(branchesQuery).all<any>();
+
+      // Users: PRINCIPAL_PARTNER sees all; others see only users in their branch
+      const usersQuery = branchFilter
+        ? 'SELECT id, username, name, email, phone, role, branch_id, title, practice_areas, bio, photo_url, availability, is_publicly_visible, is_active, account_status, requires_password_change, created_at FROM users WHERE branch_id = ?'
+        : 'SELECT id, username, name, email, phone, role, branch_id, title, practice_areas, bio, photo_url, availability, is_publicly_visible, is_active, account_status, requires_password_change, created_at FROM users';
+      const users = branchFilter
+        ? await db.prepare(usersQuery).bind(branchFilter).all<any>()
+        : await db.prepare(usersQuery).all<any>();
+
+      // Courts and institutions are reference data — visible to all authenticated users
       const courts = await db.prepare('SELECT * FROM courts').all<any>().catch(() => ({ results: [] }));
       const institutions = await db.prepare('SELECT * FROM partner_institutions').all<any>().catch(() => ({ results: [] }));
-      const clients = await db.prepare('SELECT * FROM clients ORDER BY date_registered DESC').all<any>();
-      const consultations = await db.prepare('SELECT * FROM consultations ORDER BY created_at DESC').all<any>();
-      const matters = await db.prepare('SELECT * FROM matters ORDER BY created_at DESC').all<any>();
-      const cases = await db.prepare('SELECT * FROM cases ORDER BY created_at DESC').all<any>();
-      const caseAssignments = await db.prepare('SELECT * FROM case_assignments ORDER BY date_assigned DESC').all<any>();
-      const courtDiary = await db.prepare('SELECT * FROM court_diary ORDER BY court_date ASC').all<any>();
-      const tasks = await db.prepare('SELECT * FROM tasks ORDER BY due_date ASC').all<any>();
-      const properties = await db.prepare('SELECT * FROM properties ORDER BY created_at DESC').all<any>();
+
+      // Branch-filtered queries
+      const clients = branchFilter
+        ? await db.prepare('SELECT * FROM clients WHERE branch_id = ? ORDER BY date_registered DESC').bind(branchFilter).all<any>()
+        : await db.prepare('SELECT * FROM clients ORDER BY date_registered DESC').all<any>();
+
+      const consultations = branchFilter
+        ? await db.prepare('SELECT * FROM consultations WHERE branch_id = ? ORDER BY created_at DESC').bind(branchFilter).all<any>()
+        : await db.prepare('SELECT * FROM consultations ORDER BY created_at DESC').all<any>();
+
+      const matters = branchFilter
+        ? await db.prepare('SELECT * FROM matters WHERE branch_id = ? ORDER BY created_at DESC').bind(branchFilter).all<any>()
+        : await db.prepare('SELECT * FROM matters ORDER BY created_at DESC').all<any>();
+
+      const cases = branchFilter
+        ? await db.prepare('SELECT * FROM cases WHERE branch_id = ? ORDER BY created_at DESC').bind(branchFilter).all<any>()
+        : await db.prepare('SELECT * FROM cases ORDER BY created_at DESC').all<any>();
+
+      const caseAssignments = branchFilter
+        ? await db.prepare('SELECT * FROM case_assignments WHERE branch_id = ? ORDER BY date_assigned DESC').bind(branchFilter).all<any>()
+        : await db.prepare('SELECT * FROM case_assignments ORDER BY date_assigned DESC').all<any>();
+
+      const courtDiary = branchFilter
+        ? await db.prepare('SELECT * FROM court_diary WHERE branch_id = ? ORDER BY court_date ASC').bind(branchFilter).all<any>()
+        : await db.prepare('SELECT * FROM court_diary ORDER BY court_date ASC').all<any>();
+
+      const tasks = branchFilter
+        ? await db.prepare('SELECT * FROM tasks WHERE branch_id = ? ORDER BY due_date ASC').bind(branchFilter).all<any>()
+        : await db.prepare('SELECT * FROM tasks ORDER BY due_date ASC').all<any>();
+
+      const properties = branchFilter
+        ? await db.prepare('SELECT * FROM properties WHERE branch_id = ? ORDER BY created_at DESC').bind(branchFilter).all<any>()
+        : await db.prepare('SELECT * FROM properties ORDER BY created_at DESC').all<any>();
+
+      // Landlords don't have branch_id column in all schema versions — filter via properties if needed
       const landlords = await db.prepare('SELECT * FROM landlords ORDER BY date_registered DESC').all<any>();
       const units = await db.prepare('SELECT * FROM units').all<any>().catch(() => ({ results: [] }));
       const tenants = await db.prepare('SELECT * FROM tenants ORDER BY date_registered DESC').all<any>();
       const tenancies = await db.prepare('SELECT * FROM tenancies').all<any>().catch(() => ({ results: [] }));
       const rentRecords = await db.prepare('SELECT * FROM rent_records').all<any>().catch(() => ({ results: [] }));
       const quitNotices = await db.prepare('SELECT * FROM quit_notices ORDER BY created_at DESC').all<any>();
-      const invoices = await db.prepare('SELECT * FROM invoices ORDER BY created_at DESC').all<any>();
-      const payments = await db.prepare('SELECT * FROM payments ORDER BY submitted_at DESC').all<any>();
-      const expenses = await db.prepare('SELECT * FROM expenses ORDER BY created_at DESC').all<any>().catch(() => ({ results: [] }));
-      const students = await db.prepare('SELECT * FROM students ORDER BY created_at DESC').all<any>();
-      const documents = await db.prepare('SELECT * FROM documents ORDER BY upload_date DESC').all<any>();
+
+      const invoices = branchFilter
+        ? await db.prepare('SELECT * FROM invoices WHERE branch_id = ? ORDER BY created_at DESC').bind(branchFilter).all<any>()
+        : await db.prepare('SELECT * FROM invoices ORDER BY created_at DESC').all<any>();
+
+      const payments = branchFilter
+        ? await db.prepare('SELECT * FROM payments WHERE branch_id = ? ORDER BY submitted_at DESC').bind(branchFilter).all<any>()
+        : await db.prepare('SELECT * FROM payments ORDER BY submitted_at DESC').all<any>();
+
+      const expenses = branchFilter
+        ? await db.prepare('SELECT * FROM expenses WHERE branch_id = ? ORDER BY created_at DESC').bind(branchFilter).all<any>().catch(() => ({ results: [] }))
+        : await db.prepare('SELECT * FROM expenses ORDER BY created_at DESC').all<any>().catch(() => ({ results: [] }));
+
+      const students = branchFilter
+        ? await db.prepare('SELECT * FROM students WHERE assigned_branch_id = ? ORDER BY created_at DESC').bind(branchFilter).all<any>()
+        : await db.prepare('SELECT * FROM students ORDER BY created_at DESC').all<any>();
+
+      const documents = branchFilter
+        ? await db.prepare('SELECT * FROM documents WHERE branch_id = ? ORDER BY upload_date DESC').bind(branchFilter).all<any>()
+        : await db.prepare('SELECT * FROM documents ORDER BY upload_date DESC').all<any>();
+
       let correspondence: any = { results: [] };
       try {
-        correspondence = await db.prepare('SELECT * FROM correspondence ORDER BY created_at DESC').all<any>();
+        correspondence = branchFilter
+          ? await db.prepare('SELECT * FROM correspondence WHERE branch_id = ? ORDER BY created_at DESC').bind(branchFilter).all<any>()
+          : await db.prepare('SELECT * FROM correspondence ORDER BY created_at DESC').all<any>();
       } catch {
         try {
           correspondence = await db.prepare('SELECT * FROM correspondence ORDER BY date DESC').all<any>();
@@ -561,9 +700,15 @@ export async function handleApiRequest(
       const appointments = await db.prepare('SELECT * FROM appointments ORDER BY date ASC').all<any>().catch(() => ({ results: [] }));
       const publicNotices = await db.prepare('SELECT * FROM public_notices ORDER BY publish_date DESC').all<any>();
       const publicEnquiries = await db.prepare('SELECT * FROM public_enquiries ORDER BY created_at DESC').all<any>().catch(() => ({ results: [] }));
-      const approvals = await db.prepare('SELECT * FROM approvals ORDER BY submitted_at DESC').all<any>().catch(() => ({ results: [] }));
+      const approvals = branchFilter
+        ? await db.prepare('SELECT * FROM approvals WHERE branch_id = ? ORDER BY submitted_at DESC').bind(branchFilter).all<any>().catch(() => ({ results: [] }))
+        : await db.prepare('SELECT * FROM approvals ORDER BY submitted_at DESC').all<any>().catch(() => ({ results: [] }));
       const websiteContent = await db.prepare("SELECT * FROM website_content WHERE id = 'cms-main'").first<any>();
-      const auditLogs = await db.prepare('SELECT * FROM audit_logs ORDER BY timestamp DESC LIMIT 100').all<any>();
+
+      // Audit logs: PRINCIPAL_PARTNER sees all, others see only their own actions
+      const auditLogs = branchFilter
+        ? await db.prepare('SELECT * FROM audit_logs WHERE user_id IN (SELECT id FROM users WHERE branch_id = ?) ORDER BY timestamp DESC LIMIT 100').bind(branchFilter).all<any>()
+        : await db.prepare('SELECT * FROM audit_logs ORDER BY timestamp DESC LIMIT 100').all<any>();
 
       return jsonResponse({
         success: true,
@@ -1321,11 +1466,24 @@ export async function handleApiRequest(
     // --------------------------------------------------------------------------
     if (path === '/api/clients') {
       if (request.method === 'GET') {
-        const rows = await db.prepare('SELECT * FROM clients ORDER BY date_registered DESC').all<any>();
+        // SECURITY FIX: Require authentication to read client data
+        const auth = await getAuthUser(request, db);
+        if (!auth) {
+          return errorResponse('Unauthorized: Valid personnel login required.', 401);
+        }
+        const bf = branchFilterClause(auth.user);
+        const rows = bf.clause
+          ? await db.prepare(`SELECT * FROM clients ${bf.clause} ORDER BY date_registered DESC`).bind(...bf.params).all<any>()
+          : await db.prepare('SELECT * FROM clients ORDER BY date_registered DESC').all<any>();
         return jsonResponse({ success: true, clients: rows.results || [] });
       }
 
       if (request.method === 'POST') {
+        // SECURITY FIX: Require authentication to create clients
+        const auth = await getAuthUser(request, db);
+        if (!auth) {
+          return errorResponse('Unauthorized: Valid personnel login required.', 401);
+        }
         const body = await request.json() as any;
         const clientId = body.clientId || await getNextNumber(db, 'client', 'CLI');
         const id = body.id || `cli-${Date.now()}`;
@@ -1374,6 +1532,11 @@ export async function handleApiRequest(
     }
 
     if (path.startsWith('/api/clients/') && request.method === 'PUT') {
+      // SECURITY FIX: Require authentication to update clients
+      const auth = await getAuthUser(request, db);
+      if (!auth) {
+        return errorResponse('Unauthorized: Valid personnel login required.', 401);
+      }
       const id = path.replace('/api/clients/', '').trim();
       const body = await request.json() as any;
 
@@ -1401,11 +1564,27 @@ export async function handleApiRequest(
     // --------------------------------------------------------------------------
     if (path === '/api/invoices') {
       if (request.method === 'GET') {
-        const rows = await db.prepare('SELECT * FROM invoices ORDER BY created_at DESC').all<any>();
+        // SECURITY FIX: Require authentication to read invoices
+        const auth = await getAuthUser(request, db);
+        if (!auth) {
+          return errorResponse('Unauthorized: Valid personnel login required.', 401);
+        }
+        const bf = branchFilterClause(auth.user);
+        const rows = bf.clause
+          ? await db.prepare(`SELECT * FROM invoices ${bf.clause} ORDER BY created_at DESC`).bind(...bf.params).all<any>()
+          : await db.prepare('SELECT * FROM invoices ORDER BY created_at DESC').all<any>();
         return jsonResponse({ success: true, invoices: rows.results || [] });
       }
 
       if (request.method === 'POST') {
+        // SECURITY FIX: Require billing-role authentication to create invoices
+        const auth = await getAuthUser(request, db);
+        if (!auth) {
+          return errorResponse('Unauthorized: Valid personnel login required.', 401);
+        }
+        if (!canManageBilling(auth.user)) {
+          return errorResponse('Unauthorized: Only billing-authorized personnel can create invoices.', 403);
+        }
         const body = await request.json() as any;
         const invoiceNumber = body.invoiceNumber || await getNextNumber(db, 'invoice', 'INV');
         const paymentReference = body.paymentReference || await getNextNumber(db, 'payment', 'PAY');
@@ -1423,10 +1602,7 @@ export async function handleApiRequest(
           body.paymentStatus || 'UNPAID', body.approvalStatus || 'NONE', paymentReference, body.paymentMethod || null, body.notes || ''
         ).run();
 
-        const auth = await getAuthUser(request, db);
-        if (auth) {
-          await logAudit(db, auth.user.id, auth.user.name, auth.user.role, 'CREATE_INVOICE', 'Invoice', id, `Generated invoice ${invoiceNumber} for ${body.clientName} (₦${Number(body.totalAmount).toLocaleString()})`);
-        }
+        await logAudit(db, auth.user.id, auth.user.name, auth.user.role, 'CREATE_INVOICE', 'Invoice', id, `Generated invoice ${invoiceNumber} for ${body.clientName} (₦${Number(body.totalAmount).toLocaleString()})`);
 
         return jsonResponse({ success: true, invoiceNumber, paymentReference, id });
       }
@@ -1437,9 +1613,12 @@ export async function handleApiRequest(
       const body = await request.json() as any;
       const auth = await getAuthUser(request, db);
 
-      // Enforce role authorization
-      if (auth && auth.user.role !== 'PRINCIPAL_PARTNER' && auth.user.role !== 'HEAD_OF_CHAMBER' && auth.user.role !== 'ACCOUNT_OFFICER') {
-        return errorResponse('Unauthorized: Only Account Officer, Head of Chamber, or Principal Partner can modify invoices.', 403);
+      // SECURITY FIX: Require authentication and billing role
+      if (!auth) {
+        return errorResponse('Unauthorized: Valid personnel login required.', 401);
+      }
+      if (!canManageBilling(auth.user)) {
+        return errorResponse('Unauthorized: Only billing-authorized personnel can modify invoices.', 403);
       }
 
       await db.prepare(
@@ -1460,11 +1639,19 @@ export async function handleApiRequest(
 
     if (path === '/api/payments') {
       if (request.method === 'GET') {
-        const rows = await db.prepare('SELECT * FROM payments ORDER BY submitted_at DESC').all<any>();
+        // SECURITY FIX: Require authentication to read payments
+        const auth = await getAuthUser(request, db);
+        if (!auth) {
+          return errorResponse('Unauthorized: Valid personnel login required.', 401);
+        }
+        const bf = branchFilterClause(auth.user);
+        const rows = bf.clause
+          ? await db.prepare(`SELECT * FROM payments ${bf.clause} ORDER BY submitted_at DESC`).bind(...bf.params).all<any>()
+          : await db.prepare('SELECT * FROM payments ORDER BY submitted_at DESC').all<any>();
         return jsonResponse({ success: true, payments: rows.results || [] });
       }
 
-      // Submit payment
+      // Submit payment — public endpoint (clients submit payment proof)
       if (request.method === 'POST') {
         const body = await request.json() as any;
         const id = body.id || `pay-${Date.now()}`;
@@ -1547,11 +1734,24 @@ export async function handleApiRequest(
     // --------------------------------------------------------------------------
     if (path === '/api/matters') {
       if (request.method === 'GET') {
-        const rows = await db.prepare('SELECT * FROM matters ORDER BY created_at DESC').all<any>();
+        // SECURITY FIX: Require authentication
+        const auth = await getAuthUser(request, db);
+        if (!auth) {
+          return errorResponse('Unauthorized: Valid personnel login required.', 401);
+        }
+        const bf = branchFilterClause(auth.user);
+        const rows = bf.clause
+          ? await db.prepare(`SELECT * FROM matters ${bf.clause} ORDER BY created_at DESC`).bind(...bf.params).all<any>()
+          : await db.prepare('SELECT * FROM matters ORDER BY created_at DESC').all<any>();
         return jsonResponse({ success: true, matters: rows.results || [] });
       }
 
       if (request.method === 'POST') {
+        // SECURITY FIX: Require authentication
+        const auth = await getAuthUser(request, db);
+        if (!auth) {
+          return errorResponse('Unauthorized: Valid personnel login required.', 401);
+        }
         const body = await request.json() as any;
         const matterId = body.matterId || await getNextNumber(db, 'matter', 'MAT');
         const id = body.id || `mat-${Date.now()}`;
@@ -1566,10 +1766,7 @@ export async function handleApiRequest(
           body.engagementDate || new Date().toISOString().split('T')[0], body.clientVisibleUpdate || '', body.privilegedInternalNotes || ''
         ).run();
 
-        const auth = await getAuthUser(request, db);
-        if (auth) {
-          await logAudit(db, auth.user.id, auth.user.name, auth.user.role, 'CREATE_MATTER', 'Matter', id, `Opened matter: ${body.title} (${matterId})`);
-        }
+        await logAudit(db, auth.user.id, auth.user.name, auth.user.role, 'CREATE_MATTER', 'Matter', id, `Opened matter: ${body.title} (${matterId})`);
         return jsonResponse({ success: true, matterId, id });
       }
     }
@@ -1618,11 +1815,24 @@ export async function handleApiRequest(
 
     if (path === '/api/cases') {
       if (request.method === 'GET') {
-        const rows = await db.prepare('SELECT * FROM cases ORDER BY created_at DESC').all<any>();
+        // SECURITY FIX: Require authentication
+        const auth = await getAuthUser(request, db);
+        if (!auth) {
+          return errorResponse('Unauthorized: Valid personnel login required.', 401);
+        }
+        const bf = branchFilterClause(auth.user);
+        const rows = bf.clause
+          ? await db.prepare(`SELECT * FROM cases ${bf.clause} ORDER BY created_at DESC`).bind(...bf.params).all<any>()
+          : await db.prepare('SELECT * FROM cases ORDER BY created_at DESC').all<any>();
         return jsonResponse({ success: true, cases: rows.results || [] });
       }
 
       if (request.method === 'POST') {
+        // SECURITY FIX: Require authentication
+        const auth = await getAuthUser(request, db);
+        if (!auth) {
+          return errorResponse('Unauthorized: Valid personnel login required.', 401);
+        }
         const body = await request.json() as any;
         const caseId = body.caseId || await getNextNumber(db, 'case', 'CASE');
         const id = body.id || `case-${Date.now()}`;
@@ -1639,20 +1849,17 @@ export async function handleApiRequest(
           body.nextCourtDate || null, body.status || 'Hearing', body.clientVisibleUpdate || '', body.internalStrategyNotes || ''
         ).run();
 
-        // Create assignment record
+        // Create assignment record (auth already verified above)
         const asgnId = `asgn-${Date.now()}`;
-        const auth = await getAuthUser(request, db);
         await db.prepare(
           `INSERT INTO case_assignments (id, case_id, suit_number, branch_id, counsel_id, assigned_by_id, assigned_by_name, date_assigned, status)
            VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), 'PENDING')`
         ).bind(
           asgnId, id, body.suitNumber, body.branchId || 'br-abuja-01', body.counselId,
-          auth?.user.id || 'usr-principal-01', auth?.user.name || 'Principal Partner'
+          auth.user.id, auth.user.name
         ).run();
 
-        if (auth) {
-          await logAudit(db, auth.user.id, auth.user.name, auth.user.role, 'FILE_CASE', 'Case', id, `Registered case ${body.suitNumber} (${caseId})`);
-        }
+        await logAudit(db, auth.user.id, auth.user.name, auth.user.role, 'FILE_CASE', 'Case', id, `Registered case ${body.suitNumber} (${caseId})`);
         return jsonResponse({ success: true, caseId, id });
       }
     }
@@ -1703,6 +1910,11 @@ export async function handleApiRequest(
     }
 
     if (path.startsWith('/api/case-assignments/') && request.method === 'PUT') {
+      // SECURITY FIX: Require authentication
+      const auth = await getAuthUser(request, db);
+      if (!auth) {
+        return errorResponse('Unauthorized: Valid personnel login required.', 401);
+      }
       const id = path.replace('/api/case-assignments/', '').trim();
       const body = await request.json() as any;
       const { status, reason, notes } = body;
@@ -1713,10 +1925,7 @@ export async function handleApiRequest(
          WHERE id = ?`
       ).bind(status, reason || null, notes || null, id).run();
 
-      const auth = await getAuthUser(request, db);
-      if (auth) {
-        await logAudit(db, auth.user.id, auth.user.name, auth.user.role, `ASSIGNMENT_${status}`, 'CaseAssignment', id, `Counsel responded with ${status}`);
-      }
+      await logAudit(db, auth.user.id, auth.user.name, auth.user.role, `ASSIGNMENT_${status}`, 'CaseAssignment', id, `Counsel responded with ${status}`);
       return jsonResponse({ success: true });
     }
 
@@ -1725,11 +1934,24 @@ export async function handleApiRequest(
     // --------------------------------------------------------------------------
     if (path === '/api/court-diary') {
       if (request.method === 'GET') {
-        const rows = await db.prepare('SELECT * FROM court_diary ORDER BY court_date ASC').all<any>();
+        // SECURITY FIX: Require authentication
+        const auth = await getAuthUser(request, db);
+        if (!auth) {
+          return errorResponse('Unauthorized: Valid personnel login required.', 401);
+        }
+        const bf = branchFilterClause(auth.user);
+        const rows = bf.clause
+          ? await db.prepare(`SELECT * FROM court_diary ${bf.clause} ORDER BY court_date ASC`).bind(...bf.params).all<any>()
+          : await db.prepare('SELECT * FROM court_diary ORDER BY court_date ASC').all<any>();
         return jsonResponse({ success: true, diary: rows.results || [] });
       }
 
       if (request.method === 'POST') {
+        // SECURITY FIX: Require authentication
+        const auth = await getAuthUser(request, db);
+        if (!auth) {
+          return errorResponse('Unauthorized: Valid personnel login required.', 401);
+        }
         const body = await request.json() as any;
         const id = body.id || `diary-${Date.now()}`;
 
@@ -1751,20 +1973,32 @@ export async function handleApiRequest(
 
     if (path === '/api/tasks') {
       if (request.method === 'GET') {
-        const rows = await db.prepare('SELECT * FROM tasks ORDER BY due_date ASC').all<any>();
+        // SECURITY FIX: Require authentication
+        const auth = await getAuthUser(request, db);
+        if (!auth) {
+          return errorResponse('Unauthorized: Valid personnel login required.', 401);
+        }
+        const bf = branchFilterClause(auth.user);
+        const rows = bf.clause
+          ? await db.prepare(`SELECT * FROM tasks ${bf.clause} ORDER BY due_date ASC`).bind(...bf.params).all<any>()
+          : await db.prepare('SELECT * FROM tasks ORDER BY due_date ASC').all<any>();
         return jsonResponse({ success: true, tasks: rows.results || [] });
       }
 
       if (request.method === 'POST') {
+        // SECURITY FIX: Require authentication
+        const auth = await getAuthUser(request, db);
+        if (!auth) {
+          return errorResponse('Unauthorized: Valid personnel login required.', 401);
+        }
         const body = await request.json() as any;
         const id = body.id || `task-${Date.now()}`;
-        const auth = await getAuthUser(request, db);
 
         await db.prepare(
           `INSERT INTO tasks (id, title, assigned_to_id, assigned_by_id, branch_id, matter_id, case_id, priority, due_date, status, notes)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending', ?)`
         ).bind(
-          id, body.title, body.assignedToId, auth?.user.id || 'usr-principal-01',
+          id, body.title, body.assignedToId, auth.user.id,
           body.branchId || 'br-abuja-01', body.matterId || null, body.caseId || null,
           body.priority || 'Medium', body.dueDate, body.notes || ''
         ).run();
@@ -1778,11 +2012,24 @@ export async function handleApiRequest(
     // --------------------------------------------------------------------------
     if (path === '/api/properties' || path.startsWith('/api/properties/')) {
       if (request.method === 'GET') {
-        const rows = await db.prepare('SELECT * FROM properties ORDER BY created_at DESC').all<any>();
+        // SECURITY FIX: Require authentication
+        const auth = await getAuthUser(request, db);
+        if (!auth) {
+          return errorResponse('Unauthorized: Valid personnel login required.', 401);
+        }
+        const bf = branchFilterClause(auth.user);
+        const rows = bf.clause
+          ? await db.prepare(`SELECT * FROM properties ${bf.clause} ORDER BY created_at DESC`).bind(...bf.params).all<any>()
+          : await db.prepare('SELECT * FROM properties ORDER BY created_at DESC').all<any>();
         return jsonResponse({ success: true, properties: rows.results || [] });
       }
 
       if (request.method === 'POST') {
+        // SECURITY FIX: Require authentication
+        const auth = await getAuthUser(request, db);
+        if (!auth) {
+          return errorResponse('Unauthorized: Valid personnel login required.', 401);
+        }
         const body = await request.json() as any;
         const propertyId = body.propertyId || await getNextNumber(db, 'property', 'PROP');
         const id = body.id || `prop-${Date.now()}`;
@@ -1800,14 +2047,16 @@ export async function handleApiRequest(
           body.registrationPaymentStatus || 'PAID_CONFIRMED', body.registrationFee !== undefined ? Number(body.registrationFee) : 50000
         ).run();
 
-        const auth = await getAuthUser(request, db);
-        if (auth) {
-          await logAudit(db, auth.user.id, auth.user.name, auth.user.role, 'ADD_PROPERTY', 'Property', id, `Registered property: ${body.name} (${propertyId})`);
-        }
+        await logAudit(db, auth.user.id, auth.user.name, auth.user.role, 'ADD_PROPERTY', 'Property', id, `Registered property: ${body.name} (${propertyId})`);
         return jsonResponse({ success: true, propertyId, id });
       }
 
       if (request.method === 'PUT') {
+        // SECURITY FIX: Require authentication
+        const auth = await getAuthUser(request, db);
+        if (!auth) {
+          return errorResponse('Unauthorized: Valid personnel login required.', 401);
+        }
         const id = path.split('/')[3];
         const body = await request.json() as any;
         
@@ -1839,11 +2088,21 @@ export async function handleApiRequest(
 
     if (path === '/api/landlords') {
       if (request.method === 'GET') {
+        // SECURITY FIX: Require authentication
+        const auth = await getAuthUser(request, db);
+        if (!auth) {
+          return errorResponse('Unauthorized: Valid personnel login required.', 401);
+        }
         const rows = await db.prepare('SELECT * FROM landlords ORDER BY date_registered DESC').all<any>();
         return jsonResponse({ success: true, landlords: rows.results || [] });
       }
 
       if (request.method === 'POST') {
+        // SECURITY FIX: Require authentication
+        const auth = await getAuthUser(request, db);
+        if (!auth) {
+          return errorResponse('Unauthorized: Valid personnel login required.', 401);
+        }
         const body = await request.json() as any;
         const trackingCode = await getNextNumber(db, 'landlord', 'LAND');
         const count = await db.prepare('SELECT COUNT(*) as c FROM landlords').first<{ c: number }>();
@@ -1864,11 +2123,21 @@ export async function handleApiRequest(
 
     if (path === '/api/tenants') {
       if (request.method === 'GET') {
+        // SECURITY FIX: Require authentication
+        const auth = await getAuthUser(request, db);
+        if (!auth) {
+          return errorResponse('Unauthorized: Valid personnel login required.', 401);
+        }
         const rows = await db.prepare('SELECT * FROM tenants ORDER BY date_registered DESC').all<any>();
         return jsonResponse({ success: true, tenants: rows.results || [] });
       }
 
       if (request.method === 'POST') {
+        // SECURITY FIX: Require authentication
+        const auth = await getAuthUser(request, db);
+        if (!auth) {
+          return errorResponse('Unauthorized: Valid personnel login required.', 401);
+        }
         const body = await request.json() as any;
         const trackingCode = await getNextNumber(db, 'tenancy', 'TEN');
         const count = await db.prepare('SELECT COUNT(*) as c FROM tenants').first<{ c: number }>();
@@ -1889,15 +2158,24 @@ export async function handleApiRequest(
 
     if (path === '/api/quit-notices') {
       if (request.method === 'GET') {
+        // SECURITY FIX: Require authentication
+        const auth = await getAuthUser(request, db);
+        if (!auth) {
+          return errorResponse('Unauthorized: Valid personnel login required.', 401);
+        }
         const rows = await db.prepare('SELECT * FROM quit_notices ORDER BY created_at DESC').all<any>();
         return jsonResponse({ success: true, quitNotices: rows.results || [] });
       }
 
       if (request.method === 'POST') {
+        // SECURITY FIX: Require authentication
+        const auth = await getAuthUser(request, db);
+        if (!auth) {
+          return errorResponse('Unauthorized: Valid personnel login required.', 401);
+        }
         const body = await request.json() as any;
         const quitNoticeId = await getNextNumber(db, 'quit_notice', 'QUIT');
         const id = body.id || `qn-${Date.now()}`;
-        const auth = await getAuthUser(request, db);
 
         await db.prepare(
           `INSERT INTO quit_notices 
@@ -1907,7 +2185,7 @@ export async function handleApiRequest(
           id, quitNoticeId, body.tenantId, body.tenantName, body.propertyId, body.propertyName,
           body.landlordId, body.landlordName, body.unitNumber, body.noticeType, body.noticeDate,
           body.noticeExpiryDate, body.reason, body.statutoryBasis,
-          auth?.user.id || 'usr-principal-01', auth?.user.name || 'Principal Partner'
+          auth.user.id, auth.user.name
         ).run();
 
         return jsonResponse({ success: true, quitNoticeId, id });
@@ -2344,7 +2622,7 @@ export async function handleApiRequest(
     }
 
     // --------------------------------------------------------------------------
-    // 12. D1 SQL QUERY (RESTRICTED TO PRINCIPAL PARTNER)
+    // 12. D1 SQL QUERY (RESTRICTED TO PRINCIPAL PARTNER, READ-ONLY)
     // --------------------------------------------------------------------------
     if (path === '/api/d1/query' && request.method === 'POST') {
       const auth = await getAuthUser(request, db);
@@ -2358,15 +2636,34 @@ export async function handleApiRequest(
 
       if (!sql) return errorResponse('SQL statement cannot be empty.');
 
-      const statement = db.prepare(sql);
-      const bound = params.length > 0 ? statement.bind(...params) : statement;
-      const result = await bound.all();
+      // SECURITY FIX: Only allow SELECT statements — block all writes and schema changes
+      const sqlUpper = sql.toUpperCase().trim();
+      const FORBIDDEN_KEYWORDS = [
+        'INSERT', 'UPDATE', 'DELETE', 'DROP', 'CREATE', 'ALTER', 'ATTACH',
+        'DETACH', 'REPLACE', 'PRAGMA', 'VACUUM', 'REINDEX'
+      ];
+      if (!sqlUpper.startsWith('SELECT') && !sqlUpper.startsWith('WITH')) {
+        return errorResponse('Security restriction: Only SELECT queries are permitted on the D1 query console.', 403);
+      }
+      for (const keyword of FORBIDDEN_KEYWORDS) {
+        if (sqlUpper.includes(keyword)) {
+          return errorResponse(`Security restriction: ${keyword} statements are not permitted on the D1 query console.`, 403);
+        }
+      }
 
-      return jsonResponse({
-        success: true,
-        results: result.results || [],
-        meta: result.meta
-      });
+      try {
+        const statement = db.prepare(sql);
+        const bound = params.length > 0 ? statement.bind(...params) : statement;
+        const result = await bound.all();
+
+        return jsonResponse({
+          success: true,
+          results: result.results || [],
+          meta: result.meta
+        });
+      } catch (err: any) {
+        return errorResponse(`Query execution error: ${err.message}`, 400);
+      }
     }
 
     return errorResponse(`Endpoint "${path}" not found.`, 404);

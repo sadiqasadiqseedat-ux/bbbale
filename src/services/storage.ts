@@ -847,26 +847,11 @@ export const storageService = {
         error: res.error || 'Invalid credentials'
       };
     } catch (err: any) {
-      // Fallback verification for local offline development
-      const localUser = storageService.getUserByUsernameOrEmail(identifier);
-      if (localUser) {
-        if (password === 'admin@2026' || await verifyPassword(password, localUser.salt, localUser.passwordHash)) {
-          const fallbackSession: UserSession = {
-            userId: localUser.id,
-            token: `dev-session-${Date.now()}`,
-            role: localUser.role,
-            branchId: localUser.branchId,
-            rememberMe,
-            expiresAt: new Date(Date.now() + 86400000).toISOString(),
-            lastActiveAt: new Date().toISOString()
-          };
-          memory.session = fallbackSession;
-          setToStorage(STORAGE_KEYS.AUTH_SESSION, fallbackSession);
-          notifySubscribers();
-          return { success: true, user: localUser, session: fallbackSession, requiresPasswordChange: localUser.requiresPasswordChange };
-        }
-      }
-      return { success: false, error: err.message || 'Authentication error' };
+      // SECURITY FIX: Offline auth bypass removed.
+      // The previous code accepted the hardcoded password 'admin@2026' for any user
+      // when the API was unreachable. This allowed unauthenticated access to the entire
+      // system. Authentication must now go through the server-side D1 verification.
+      return { success: false, error: 'Unable to reach authentication server. Please check your connection and try again.' };
     }
   },
 
@@ -934,15 +919,26 @@ export const storageService = {
     }
 
     const tempPassword = `Reset@${Math.floor(100000 + Math.random() * 900000)}!`;
-    const newSalt = generateSalt();
-    const newHash = await hashPassword(tempPassword, newSalt);
 
+    try {
+      // SECURITY FIX: Persist password reset to server-side D1
+      const res = await apiFetch('/api/auth/admin-reset-password', {
+        method: 'POST',
+        body: JSON.stringify({ targetUserId, temporaryPassword: tempPassword })
+      });
+
+      if (!res.success) {
+        return { success: false, error: res.error || 'Failed to reset password on server.' };
+      }
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Failed to reset password on server.' };
+    }
+
+    // Update local cache
     const users = memory.users.map(u => {
       if (u.id === targetUserId) {
         return {
           ...u,
-          salt: newSalt,
-          passwordHash: newHash,
           requiresPasswordChange: true,
           accountStatus: 'Password Reset Required' as const,
           passwordChangedAt: new Date().toISOString()
@@ -969,7 +965,11 @@ export const storageService = {
   },
 
   completePasswordResetWithToken: async (token: string, newPassword: string): Promise<{ success: boolean; error?: string }> => {
-    return { success: true };
+    // SECURITY FIX: Password reset now requires server-side verification.
+    // The previous implementation always returned success without verifying the token
+    // or actually resetting the password. This is a stub that must be wired to a
+    // proper server-side reset endpoint before use.
+    return { success: false, error: 'Password reset is not yet available. Please contact the Principal Partner or Head of Chamber to reset your password.' };
   },
 
   // User CRUD
@@ -990,7 +990,9 @@ export const storageService = {
     }
 
     const salt = generateSalt();
-    const hash = await hashPassword(data.initialPassword || 'admin@2026', salt);
+    // SECURITY FIX: Use a generated temporary password instead of hardcoded default
+    const tempPassword = data.initialPassword || `Temp${Math.floor(100000 + Math.random() * 900000)}!`;
+    const hash = await hashPassword(tempPassword, salt);
 
     const newUser: User = {
       id: `usr-${Date.now()}`,
@@ -1258,7 +1260,7 @@ export const storageService = {
 
   // Clients (Authoritative against D1)
   getClients: (): Client[] => memory.clients,
-  addClient: (clientData: Omit<Client, 'id' | 'clientId' | 'dateRegistered'>, actor: User): Client => {
+  addClient: async (clientData: Omit<Client, 'id' | 'clientId' | 'dateRegistered'>, actor: User): Promise<Client> => {
     const clientId = getNextNumber('client', 'CLI');
     const newClient: Client = {
       ...clientData,
@@ -1267,21 +1269,24 @@ export const storageService = {
       dateRegistered: new Date().toISOString()
     };
 
+    // PERSISTENCE FIX: Await server write before updating UI
+    try {
+      const res = await apiFetch('/api/clients', {
+        method: 'POST',
+        body: JSON.stringify(newClient)
+      });
+      if (res.client) {
+        newClient.id = res.client.id || newClient.id;
+        newClient.clientId = res.client.clientId || newClient.clientId;
+      }
+    } catch (err) {
+      console.error('Failed saving client to D1:', err);
+      throw new Error('Failed to save client to the database. Please try again.');
+    }
+
     memory.clients = [newClient, ...memory.clients];
     setToStorage(STORAGE_KEYS.CLIENTS, memory.clients);
     notifySubscribers();
-
-    // Persist to Cloudflare D1
-    apiFetch('/api/clients', {
-      method: 'POST',
-      body: JSON.stringify(newClient)
-    }).then(res => {
-      if (res.client) {
-        memory.clients = memory.clients.map(c => c.id === newClient.id ? res.client : c);
-        setToStorage(STORAGE_KEYS.CLIENTS, memory.clients);
-        notifySubscribers();
-      }
-    }).catch(err => console.error('Failed saving client to D1:', err));
 
     logAudit(actor, 'REGISTER_CLIENT', 'Client', newClient.id, `Registered client: ${newClient.fullName} (${clientId})`);
     return newClient;
@@ -1302,14 +1307,27 @@ export const storageService = {
 
   // Consultations & Public Bookings
   getConsultations: (): Consultation[] => memory.consultations,
-  bookConsultation: (data: any): { consultation: Consultation; invoice: Invoice; paymentRef: string } => {
-    const code = getNextNumber('consultation', 'CONS');
-    const invoiceNumber = getNextNumber('invoice', 'INV');
-    const paymentRef = getNextNumber('payment', 'PAY');
+  bookConsultation: async (data: any): Promise<{ consultation: Consultation; invoice: Invoice; paymentRef: string }> => {
     const fee = data.feeAmount || memory.websiteContent.consultationFeeStandard || 35000;
 
+    // PERSISTENCE FIX: Await server-side creation (consultation + invoice are created atomically on server)
+    let serverRes: any = null;
+    try {
+      serverRes = await apiFetch('/api/consultations', {
+        method: 'POST',
+        body: JSON.stringify(data)
+      });
+    } catch (err) {
+      console.error('Failed creating consultation in D1:', err);
+      throw new Error('Failed to submit consultation request. Please try again.');
+    }
+
+    const code = serverRes?.consultation?.code || getNextNumber('consultation', 'CONS');
+    const invoiceNumber = serverRes?.invoiceNumber || getNextNumber('invoice', 'INV');
+    const paymentRef = serverRes?.paymentReference || getNextNumber('payment', 'PAY');
+
     const newConsultation: Consultation = {
-      id: `cons-${Date.now()}`,
+      id: serverRes?.consultation?.id || `cons-${Date.now()}`,
       code,
       serviceCategory: data.serviceCategory,
       preferredDate: data.preferredDate,
@@ -1352,11 +1370,6 @@ export const storageService = {
     setToStorage(STORAGE_KEYS.CONSULTATIONS, memory.consultations);
     setToStorage(STORAGE_KEYS.INVOICES, memory.invoices);
     notifySubscribers();
-
-    apiFetch('/api/consultations', {
-      method: 'POST',
-      body: JSON.stringify(data)
-    }).catch(e => console.error('Failed creating consultation in D1:', e));
 
     return { consultation: newConsultation, invoice: newInvoice, paymentRef };
   },
@@ -1442,15 +1455,28 @@ export const storageService = {
 
   // Payments
   getPayments: (): PaymentRecord[] => memory.payments,
-  submitPayment: (data: any): PaymentRecord => {
+  submitPayment: async (data: any): Promise<PaymentRecord> => {
     const targetInvoice = memory.invoices.find(inv => 
       inv.invoiceNumber === data.invoiceNumber || 
       inv.paymentReference === data.paymentReference
     );
     const resolvedBranchId = data.branchId || targetInvoice?.branchId || 'br-abuja-01';
 
+    // PERSISTENCE FIX: Await server write before updating UI
+    let serverPaymentId: string | undefined;
+    try {
+      const res = await apiFetch('/api/payments', {
+        method: 'POST',
+        body: JSON.stringify({ ...data, branchId: resolvedBranchId })
+      });
+      serverPaymentId = res.paymentId;
+    } catch (err) {
+      console.error('Failed submitting payment to D1:', err);
+      throw new Error('Failed to submit payment. Please try again.');
+    }
+
     const newPayment: PaymentRecord = {
-      id: `pay-${Date.now()}`,
+      id: serverPaymentId || `pay-${Date.now()}`,
       paymentReference: data.paymentReference,
       invoiceNumber: data.invoiceNumber,
       clientName: data.clientName,
@@ -1477,11 +1503,6 @@ export const storageService = {
     });
     setToStorage(STORAGE_KEYS.INVOICES, memory.invoices);
     notifySubscribers();
-
-    apiFetch('/api/payments', {
-      method: 'POST',
-      body: JSON.stringify({ ...data, branchId: resolvedBranchId })
-    }).catch(e => console.error('Failed submitting payment to D1:', e));
 
     return newPayment;
   },

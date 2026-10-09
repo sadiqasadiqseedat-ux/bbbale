@@ -58,11 +58,12 @@ export const ClientsView: React.FC = () => {
     return () => unsub();
   }, []);
 
-  const handleCreateClient = (e: React.FormEvent) => {
+  const handleCreateClient = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.fullName || !formData.phone || !formData.email || !currentUser) return;
 
-    const newClient = storageService.addClient({
+    try {
+    const newClient = await storageService.addClient({
       fullName: formData.fullName,
       organization: formData.organization || undefined,
       clientType: formData.clientType,
