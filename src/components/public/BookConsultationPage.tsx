@@ -110,8 +110,8 @@ export const BookConsultationPage: React.FC<BookConsultationPageProps> = ({ onNa
     }
 
     setIsSubmitting(true);
-    setTimeout(() => {
-      const result = storageService.bookConsultation({
+    setTimeout(async () => {
+      const result = await storageService.bookConsultation({
         fullName: formData.fullName,
         phone: formData.phone,
         email: formData.email,
@@ -131,11 +131,11 @@ export const BookConsultationPage: React.FC<BookConsultationPageProps> = ({ onNa
     }, 400);
   };
 
-  const handlePaymentSubmit = (e: React.FormEvent) => {
+  const handlePaymentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!completedData) return;
 
-    storageService.submitPayment({
+    await storageService.submitPayment({
       paymentReference: completedData.paymentRef,
       invoiceNumber: completedData.invoice.invoiceNumber,
       clientName: completedData.consultation.fullName,
