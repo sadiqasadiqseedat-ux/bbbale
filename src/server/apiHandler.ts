@@ -1500,10 +1500,7 @@ export async function handleApiRequest(
           body.conflictCheckNotes || '', body.conflictReviewedBy || null, dateRegistered, body.confidentialNotes || ''
         ).run();
 
-        const auth = await getAuthUser(request, db);
-        if (auth) {
-          await logAudit(db, auth.user.id, auth.user.name, auth.user.role, 'REGISTER_CLIENT', 'Client', id, `Registered client: ${body.fullName} (${clientId})`);
-        }
+        await logAudit(db, auth.user.id, auth.user.name, auth.user.role, 'REGISTER_CLIENT', 'Client', id, `Registered client: ${body.fullName} (${clientId})`);
 
         const createdClient: Client = {
           id,
@@ -1552,10 +1549,7 @@ export async function handleApiRequest(
         body.conflictCheckNotes || '', body.confidentialNotes || '', body.isActive ? 1 : 0, id
       ).run();
 
-      const auth = await getAuthUser(request, db);
-      if (auth) {
-        await logAudit(db, auth.user.id, auth.user.name, auth.user.role, 'UPDATE_CLIENT', 'Client', id, `Updated client ${body.fullName}`);
-      }
+      await logAudit(db, auth.user.id, auth.user.name, auth.user.role, 'UPDATE_CLIENT', 'Client', id, `Updated client ${body.fullName}`);
       return jsonResponse({ success: true });
     }
 
