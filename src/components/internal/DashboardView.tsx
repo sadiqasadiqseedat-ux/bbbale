@@ -18,10 +18,12 @@ import {
   Scale,
   Shield,
   Send,
+  Printer,
   X
 } from 'lucide-react';
 import { storageService, subscribeToStore } from '../../services/storage';
 import { useAuth } from '../../context/AuthContext';
+import { BranchGeneralReportModal } from './BranchGeneralReportModal';
 import { 
   CaseAssignment, 
   ApprovalRequest, 
@@ -90,6 +92,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateSection 
     description: ''
   });
   const [approvalSubmitNotice, setApprovalSubmitNotice] = useState<string>('');
+  const [isBranchReportModalOpen, setIsBranchReportModalOpen] = useState(false);
 
   const loadData = () => {
     const clients = storageService.getClients();
@@ -263,7 +266,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateSection 
           </p>
         </div>
 
-        <div className="flex items-center space-x-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {(isHeadOfChamber || isPrincipalPartner) && (
+            <button
+              onClick={() => setIsBranchReportModalOpen(true)}
+              className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-semibold flex items-center space-x-1.5 shadow-xs transition-colors cursor-pointer"
+              title="Generate and print comprehensive operational and financial report for this branch"
+            >
+              <Printer className="w-4 h-4" />
+              <span>Generate Branch General Report</span>
+            </button>
+          )}
           {isPrincipalPartner && (
             <span className="text-xs bg-amber-50 text-amber-900 border border-amber-300 px-3 py-1.5 rounded-lg font-semibold flex items-center space-x-1.5">
               <Scale className="w-4 h-4 text-amber-700" />
@@ -1120,6 +1133,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateSection 
           </div>
         </div>
       )}
+
+      {/* Branch General Operational & Financial Report Modal for Head of Chamber & Principal Partner */}
+      <BranchGeneralReportModal
+        isOpen={isBranchReportModalOpen}
+        onClose={() => setIsBranchReportModalOpen(false)}
+        branchId={activeBranchId}
+      />
     </div>
   );
 };

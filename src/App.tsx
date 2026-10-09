@@ -7,6 +7,7 @@ import { AboutPage, PracticeAreasPage } from './components/public/PracticeAreasP
 import { LeadershipPage, CounselPage } from './components/public/CounselPage';
 import { BookConsultationPage } from './components/public/BookConsultationPage';
 import { TrackingCentrePage } from './components/public/TrackingCentrePage';
+import { LandlordPropertyPortalPage } from './components/public/LandlordPropertyPortalPage';
 import { InternshipPage } from './components/public/InternshipPage';
 import { NoticeBoardPage, BranchesPage, ContactPage } from './components/public/ContactPage';
 
@@ -128,6 +129,9 @@ function MainApp() {
       {publicView === 'practice' && <PracticeAreasPage />}
       {publicView === 'consultation' && (
         <BookConsultationPage onNavigateToTracking={handleNavigateToTrackingWithCode} />
+      )}
+      {publicView === 'property-register' && (
+        <LandlordPropertyPortalPage onNavigateToTracking={handleNavigateToTrackingWithCode} />
       )}
       {publicView === 'tracking' && <TrackingCentrePage />}
       {publicView === 'internship' && (

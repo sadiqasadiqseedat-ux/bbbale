@@ -11,13 +11,16 @@ import {
   Calendar, 
   FileText, 
   CheckCircle2, 
-  ChevronRight,
-  ShieldAlert,
-  ScrollText,
-  Bell
+  ChevronRight, 
+  ShieldAlert, 
+  ScrollText, 
+  Bell,
+  MapPin,
+  Image as ImageIcon
 } from 'lucide-react';
 import { storageService, subscribeToStore } from '../../services/storage';
 import { useAuth } from '../../context/AuthContext';
+import { useBranchScope } from '../../utils/branchScope';
 import { 
   Property, 
   Landlord, 
@@ -48,7 +51,8 @@ const PROPERTY_TYPES: Property['propertyType'][] = [
 ];
 
 export const PropertiesView: React.FC = () => {
-  const { currentUser, isCounselStaff } = useAuth();
+  const { currentUser, isCounselStaff, isPrincipalPartner, isHeadOfChamber, isAccountOfficer } = useAuth();
+  const { filterByBranch, currentBranchName, getCreationBranchId } = useBranchScope();
   const [activeTab, setActiveTab] = useState<'properties' | 'landlords' | 'tenants' | 'disputes' | 'quit-notices'>('properties');
 
   const [properties, setProperties] = useState<Property[]>([]);
@@ -67,6 +71,7 @@ export const PropertiesView: React.FC = () => {
 
   // New Property Modal
   const [isAddPropModalOpen, setIsAddPropModalOpen] = useState(false);
+  const [propImagePreview, setPropImagePreview] = useState<string | null>(null);
   const [propForm, setPropForm] = useState({
     name: '',
     propertyType: 'Commercial Building' as Property['propertyType'],
@@ -122,7 +127,7 @@ export const PropertiesView: React.FC = () => {
   });
 
   const loadData = () => {
-    setProperties(storageService.getProperties());
+    setProperties(filterByBranch(storageService.getProperties()));
     setLandlords(storageService.getLandlords());
     setTenants(storageService.getTenants());
     setTenancies(storageService.getTenancies());
@@ -135,7 +140,12 @@ export const PropertiesView: React.FC = () => {
     loadData();
     const unsub = subscribeToStore(loadData);
     return () => unsub();
-  }, []);
+  }, [currentUser?.branchId]);
+
+  const handleConfirmPropertyPayment = (propertyId: string) => {
+    if (!currentUser) return;
+    storageService.confirmPropertyRegistrationPayment(propertyId, currentUser);
+  };
 
   const handleCreateProperty = (e: React.FormEvent) => {
     e.preventDefault();
@@ -148,7 +158,8 @@ export const PropertiesView: React.FC = () => {
         fullName: propForm.landlordName || 'Property Owner',
         phone: propForm.landlordPhone || '+234 803 000 0000',
         email: propForm.landlordEmail || 'owner@example.com',
-        address: propForm.address
+        address: propForm.address,
+        branchId: getCreationBranchId()
       }, currentUser);
     }
 
@@ -160,6 +171,10 @@ export const PropertiesView: React.FC = () => {
       lga: propForm.lga,
       district: propForm.district,
       landlordId: landlord.id,
+      branchId: getCreationBranchId(),
+      imageUrl: propImagePreview || undefined,
+      registrationPaymentStatus: 'PAID_CONFIRMED',
+      registrationFee: 50000,
       totalUnits: Number(propForm.totalUnits) || 1,
       titleInformation: propForm.titleInformation,
       surveyInformation: propForm.surveyInformation,
@@ -169,6 +184,7 @@ export const PropertiesView: React.FC = () => {
     }, currentUser);
 
     setIsAddPropModalOpen(false);
+    setPropImagePreview(null);
     setSelectedProperty(newProp);
   };
 
@@ -309,11 +325,17 @@ export const PropertiesView: React.FC = () => {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-2xl font-serif font-bold text-slate-900">
-            Real Estate, Property & Tenancy Management
-          </h1>
+          <div className="flex items-center space-x-3">
+            <h1 className="text-2xl font-serif font-bold text-slate-900">
+              Real Estate, Property & Tenancy Management
+            </h1>
+            <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-900 border border-amber-200">
+              <MapPin className="w-3.5 h-3.5 text-amber-600" />
+              <span>{currentBranchName}</span>
+            </span>
+          </div>
           <p className="text-xs text-slate-500 mt-0.5">
-            Property Registers · Landlord Accounts · Demised Units · Tenancy Agreements · Statutory Recovery of Premises
+            Branch-isolated property register: Only properties managed by {currentBranchName} are shown.
           </p>
         </div>
 
@@ -417,12 +439,12 @@ export const PropertiesView: React.FC = () => {
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-100 text-slate-700 font-bold uppercase border-b border-slate-200">
                 <tr>
-                  <th className="p-3.5">Property Code</th>
-                  <th className="p-3.5">Property Name</th>
+                  <th className="p-3.5">Property</th>
+                  <th className="p-3.5">Code</th>
                   <th className="p-3.5">Type</th>
                   <th className="p-3.5">Location & State</th>
-                  <th className="p-3.5">Total Units</th>
-                  <th className="p-3.5">Legal Status</th>
+                  <th className="p-3.5">Units</th>
+                  <th className="p-3.5">Fee & Availability</th>
                   <th className="p-3.5 text-right">Actions</th>
                 </tr>
               </thead>
@@ -430,32 +452,69 @@ export const PropertiesView: React.FC = () => {
                 {filteredProperties.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="p-8 text-center text-slate-400">
-                      No managed properties found.
+                      No managed properties found for this branch.
                     </td>
                   </tr>
                 ) : (
-                  filteredProperties.map(p => (
-                    <tr key={p.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="p-3.5 font-mono font-bold text-slate-900">{p.propertyId}</td>
-                      <td className="p-3.5 font-semibold text-slate-900">{p.name}</td>
-                      <td className="p-3.5 text-slate-600">{p.propertyType}</td>
-                      <td className="p-3.5 text-slate-700">{p.address}, {p.state}</td>
-                      <td className="p-3.5 font-bold text-slate-900">{p.totalUnits} Units</td>
-                      <td className="p-3.5">
-                        <span className="text-[11px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded">
-                          {p.legalStatus}
-                        </span>
-                      </td>
-                      <td className="p-3.5 text-right space-x-1">
-                        <button
-                          onClick={() => setSelectedProperty(p)}
-                          className="px-2.5 py-1 text-xs text-amber-700 hover:text-amber-900 font-semibold border border-amber-300 rounded hover:bg-amber-50"
-                        >
-                          View Register
-                        </button>
-                      </td>
-                    </tr>
-                  ))
+                  filteredProperties.map(p => {
+                    const isConfirmed = p.registrationPaymentStatus === 'PAID_CONFIRMED';
+                    return (
+                      <tr key={p.id} className="hover:bg-slate-50 transition-colors">
+                        <td className="p-3.5">
+                          <div className="flex items-center space-x-3">
+                            {p.imageUrl ? (
+                              <img 
+                                src={p.imageUrl} 
+                                alt={p.name} 
+                                className="w-10 h-10 rounded-lg object-cover border border-slate-200 shadow-2xs shrink-0" 
+                              />
+                            ) : (
+                              <div className="w-10 h-10 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400 shrink-0">
+                                <Building2 className="w-5 h-5" />
+                              </div>
+                            )}
+                            <div>
+                              <p className="font-semibold text-slate-900 leading-tight">{p.name}</p>
+                              <span className="text-[10px] text-slate-400">{p.legalStatus}</span>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="p-3.5 font-mono font-bold text-slate-900">{p.propertyId}</td>
+                        <td className="p-3.5 text-slate-600">{p.propertyType}</td>
+                        <td className="p-3.5 text-slate-700">{p.address}, {p.state}</td>
+                        <td className="p-3.5 font-bold text-slate-900">{p.totalUnits} Units</td>
+                        <td className="p-3.5">
+                          <div className="space-y-1">
+                            <span className={`inline-block text-[10px] font-bold px-2 py-0.5 rounded ${
+                              isConfirmed 
+                                ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' 
+                                : 'bg-amber-100 text-amber-900 border border-amber-300'
+                            }`}>
+                              {isConfirmed ? 'ACTIVE & AVAILABLE' : 'AWAITING PAYMENT'}
+                            </span>
+                            {!isConfirmed && (isAccountOfficer || isHeadOfChamber || isPrincipalPartner) && (
+                              <div>
+                                <button
+                                  onClick={() => handleConfirmPropertyPayment(p.id)}
+                                  className="text-[10px] font-bold text-emerald-700 hover:text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded shadow-2xs"
+                                >
+                                  Confirm Fee & Activate
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                        <td className="p-3.5 text-right space-x-1">
+                          <button
+                            onClick={() => setSelectedProperty(p)}
+                            className="px-2.5 py-1 text-xs text-amber-700 hover:text-amber-900 font-semibold border border-amber-300 rounded hover:bg-amber-50"
+                          >
+                            View Register
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>

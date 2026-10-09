@@ -10,15 +10,19 @@ import {
   User, 
   Briefcase,
   AlertCircle,
-  ExternalLink
+  ExternalLink,
+  MapPin,
+  Shield
 } from 'lucide-react';
 import { storageService, subscribeToStore } from '../../services/storage';
 import { useAuth } from '../../context/AuthContext';
+import { useBranchScope } from '../../utils/branchScope';
 import { Consultation, Invoice, Matter } from '../../types';
 import { PrintDocumentModal, PrintableDocumentType } from '../common/PrintDocument';
 
 export const ConsultationsView: React.FC = () => {
   const { currentUser, isAccountOfficer, isPrincipalPartner, isHeadOfChamber } = useAuth();
+  const { filterByBranch, currentBranchName } = useBranchScope();
   const [consultations, setConsultations] = useState<Consultation[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedConsultation, setSelectedConsultation] = useState<Consultation | null>(null);
@@ -33,14 +37,15 @@ export const ConsultationsView: React.FC = () => {
   const [feedbackNotice, setFeedbackNotice] = useState<string | null>(null);
 
   const loadData = () => {
-    setConsultations(storageService.getConsultations());
+    const all = storageService.getConsultations();
+    setConsultations(filterByBranch(all));
   };
 
   useEffect(() => {
     loadData();
     const unsub = subscribeToStore(loadData);
     return () => unsub();
-  }, []);
+  }, [currentUser?.branchId]);
 
   const handleUpdateStatus = (newStatus: Consultation['status'], clientNote: string) => {
     if (!selectedConsultation || !currentUser) return;
@@ -107,11 +112,17 @@ export const ConsultationsView: React.FC = () => {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-2xl font-serif font-bold text-slate-900">
-            Legal Consultations & Intake Registry
-          </h1>
+          <div className="flex items-center space-x-3">
+            <h1 className="text-2xl font-serif font-bold text-slate-900">
+              Legal Consultations & Intake Registry
+            </h1>
+            <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-900 border border-amber-200">
+              <MapPin className="w-3.5 h-3.5 text-amber-600" />
+              <span>{currentBranchName}</span>
+            </span>
+          </div>
           <p className="text-xs text-slate-500 mt-0.5">
-            Online Consultation Requests · Invoicing · Verified Payment Clearances · Matter Promotion
+            Branch-isolated docket: Only consultations submitted to {currentBranchName} are visible here.
           </p>
         </div>
       </div>

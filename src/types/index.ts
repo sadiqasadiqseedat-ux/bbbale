@@ -68,6 +68,7 @@ export interface Branch {
   email: string;
   headOfChamberId?: string;
   isActive: boolean;
+  isHeadOffice?: boolean;
 }
 
 export interface Client {
@@ -274,6 +275,8 @@ export interface Correspondence {
   recipient: string;
   subject: string;
   content: string;
+  direction?: string;
+  status?: string;
   matterId?: string;
   caseId?: string;
   clientId?: string;
@@ -338,6 +341,9 @@ export interface Property {
   lga: string;
   district: string;
   landlordId: string;
+  imageUrl?: string;
+  registrationPaymentStatus?: 'PENDING_PAYMENT' | 'PAID_CONFIRMED';
+  registrationFee?: number;
   totalUnits: number;
   titleInformation: string;
   surveyInformation: string;
@@ -351,6 +357,7 @@ export interface Property {
 export interface Landlord {
   id: string;
   landlordId: string;
+  branchId?: string;
   fullName: string;
   phone: string;
   email: string;

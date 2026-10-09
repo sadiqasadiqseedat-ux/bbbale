@@ -12,10 +12,11 @@ import {
   CreditCard, 
   ArrowRight, 
   Building, 
-  AlertCircle 
+  AlertCircle,
+  MapPin
 } from 'lucide-react';
 import { storageService, subscribeToStore } from '../../services/storage';
-import { Consultation, Invoice, WebsiteContent } from '../../types';
+import { Consultation, Invoice, WebsiteContent, Branch } from '../../types';
 import { PrintDocumentModal } from '../common/PrintDocument';
 
 const PRACTICE_CATEGORIES = [
@@ -36,9 +37,13 @@ interface BookConsultationPageProps {
 
 export const BookConsultationPage: React.FC<BookConsultationPageProps> = ({ onNavigateToTracking }) => {
   const [cmsContent, setCmsContent] = useState<WebsiteContent>(storageService.getWebsiteContent());
+  const [branches, setBranches] = useState<Branch[]>(storageService.getBranches());
 
   useEffect(() => {
-    const updateCms = () => setCmsContent(storageService.getWebsiteContent());
+    const updateCms = () => {
+      setCmsContent(storageService.getWebsiteContent());
+      setBranches(storageService.getBranches());
+    };
     updateCms();
     const unsub = subscribeToStore(updateCms);
     return () => unsub();
@@ -202,12 +207,19 @@ export const BookConsultationPage: React.FC<BookConsultationPageProps> = ({ onNa
               <p className="font-semibold text-slate-900 text-sm mt-1">{completedData.consultation.fullName}</p>
               <p className="text-slate-600">{completedData.consultation.phone}</p>
               <p className="text-slate-600">{completedData.consultation.email}</p>
-              <p className="text-slate-700 font-medium mt-2">
-                Format: <span className="text-amber-900 font-semibold">{completedData.consultation.method}</span>
-              </p>
-              <p className="text-slate-700 font-medium">
-                Scheduled: {completedData.consultation.preferredDate} at {completedData.consultation.preferredTime}
-              </p>
+              <div className="mt-2 pt-2 border-t border-slate-200">
+                <p className="text-slate-700 font-medium">
+                  Chambers Branch: <span className="text-amber-900 font-bold">
+                    {branches.find(b => b.id === completedData.consultation.branchId)?.name || 'Abuja Head Chambers'}
+                  </span>
+                </p>
+                <p className="text-slate-700 font-medium mt-0.5">
+                  Format: <span className="text-amber-900 font-semibold">{completedData.consultation.method}</span>
+                </p>
+                <p className="text-slate-700 font-medium">
+                  Scheduled: {completedData.consultation.preferredDate} at {completedData.consultation.preferredTime}
+                </p>
+              </div>
             </div>
             <div>
               <p className="font-bold text-slate-500 uppercase">Payment Settlement Instructions:</p>
@@ -385,10 +397,67 @@ export const BookConsultationPage: React.FC<BookConsultationPageProps> = ({ onNa
             </div>
           </div>
 
-          {/* Step 2: Date, Time & Format */}
+          {/* Step 2: Chambers Branch Office Selection */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+              <h3 className="text-sm font-serif font-bold text-slate-900 uppercase tracking-wider flex items-center space-x-2">
+                <span className="w-5 h-5 rounded-full bg-slate-900 text-amber-400 text-xs flex items-center justify-center font-bold">2</span>
+                <span>Select Chambers Branch Office *</span>
+              </h3>
+              <span className="text-[11px] font-semibold text-amber-800 bg-amber-50 px-2.5 py-0.5 rounded border border-amber-200">
+                Strict Branch Data Privacy
+              </span>
+            </div>
+
+            <p className="text-xs text-slate-600">
+              Select the Chambers branch where your matter will be handled. In accordance with firm policy, only counsel and personnel at the selected branch will have access to your consultation files and enquiry.
+            </p>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              {branches.map(br => {
+                const isSelected = formData.branchId === br.id;
+                return (
+                  <div
+                    key={br.id}
+                    onClick={() => setFormData({ ...formData, branchId: br.id })}
+                    className={`cursor-pointer rounded-xl p-4 border transition-all text-left relative ${
+                      isSelected 
+                        ? 'border-amber-600 bg-amber-50/70 shadow-sm ring-2 ring-amber-500/20' 
+                        : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-center space-x-2">
+                        <MapPin className={`w-4 h-4 shrink-0 ${isSelected ? 'text-amber-700' : 'text-slate-400'}`} />
+                        <span className={`text-xs font-bold ${isSelected ? 'text-amber-950 font-serif' : 'text-slate-800'}`}>
+                          {br.name}
+                        </span>
+                      </div>
+                      <input
+                        type="radio"
+                        name="branchSelection"
+                        checked={isSelected}
+                        onChange={() => setFormData({ ...formData, branchId: br.id })}
+                        className="text-amber-600 focus:ring-amber-500 h-4 w-4"
+                      />
+                    </div>
+                    <p className="text-[11px] text-slate-600 mt-2 leading-relaxed">
+                      {br.address}
+                    </p>
+                    <div className="mt-2 pt-2 border-t border-slate-200/60 flex items-center justify-between text-[10px] text-slate-500">
+                      <span>{br.phone || '+234 803 200 1100'}</span>
+                      <span className="font-semibold text-amber-800">{br.isHeadOffice ? 'Head Office' : 'State Branch'}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Step 3: Date, Time & Format */}
           <div className="space-y-4">
             <h3 className="text-sm font-serif font-bold text-slate-900 uppercase tracking-wider pb-2 border-b border-slate-200 flex items-center space-x-2">
-              <span className="w-5 h-5 rounded-full bg-slate-900 text-amber-400 text-xs flex items-center justify-center font-bold">2</span>
+              <span className="w-5 h-5 rounded-full bg-slate-900 text-amber-400 text-xs flex items-center justify-center font-bold">3</span>
               <span>Preferred Date, Time & Consultation Format</span>
             </h3>
 
@@ -442,10 +511,10 @@ export const BookConsultationPage: React.FC<BookConsultationPageProps> = ({ onNa
             </div>
           </div>
 
-          {/* Step 3: Client Details */}
+          {/* Step 4: Client Details */}
           <div className="space-y-4">
             <h3 className="text-sm font-serif font-bold text-slate-900 uppercase tracking-wider pb-2 border-b border-slate-200 flex items-center space-x-2">
-              <span className="w-5 h-5 rounded-full bg-slate-900 text-amber-400 text-xs flex items-center justify-center font-bold">3</span>
+              <span className="w-5 h-5 rounded-full bg-slate-900 text-amber-400 text-xs flex items-center justify-center font-bold">4</span>
               <span>Client Personal & Contact Information</span>
             </h3>
 
@@ -494,10 +563,10 @@ export const BookConsultationPage: React.FC<BookConsultationPageProps> = ({ onNa
             </div>
           </div>
 
-          {/* Step 4: Matter Brief & Documents */}
+          {/* Step 5: Matter Brief & Documents */}
           <div className="space-y-4">
             <h3 className="text-sm font-serif font-bold text-slate-900 uppercase tracking-wider pb-2 border-b border-slate-200 flex items-center space-x-2">
-              <span className="w-5 h-5 rounded-full bg-slate-900 text-amber-400 text-xs flex items-center justify-center font-bold">4</span>
+              <span className="w-5 h-5 rounded-full bg-slate-900 text-amber-400 text-xs flex items-center justify-center font-bold">5</span>
               <span>Enquiry Summary & Supporting Documents</span>
             </h3>
 

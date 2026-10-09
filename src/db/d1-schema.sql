@@ -237,6 +237,7 @@ CREATE TABLE IF NOT EXISTS landlords (
   address TEXT NOT NULL,
   bank_details TEXT,
   tracking_code TEXT NOT NULL UNIQUE,
+  branch_id TEXT,
   date_registered TEXT NOT NULL
 );
 
@@ -252,6 +253,9 @@ CREATE TABLE IF NOT EXISTS properties (
   lga TEXT NOT NULL,
   district TEXT NOT NULL,
   landlord_id TEXT NOT NULL,
+  image_url TEXT,
+  registration_payment_status TEXT NOT NULL DEFAULT 'PAID_CONFIRMED',
+  registration_fee REAL DEFAULT 50000,
   total_units INTEGER NOT NULL DEFAULT 1,
   title_information TEXT NOT NULL DEFAULT '',
   survey_information TEXT NOT NULL DEFAULT '',

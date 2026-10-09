@@ -34,6 +34,7 @@ export const PublicLayout: React.FC<PublicLayoutProps> = ({
     { id: 'leadership', label: 'Leadership' },
     { id: 'counsel', label: 'Our Counsel & Availability' },
     { id: 'practice', label: 'Practice Areas' },
+    { id: 'property-register', label: 'Landlord & Property' },
     { id: 'consultation', label: 'Book Consultation' },
     { id: 'tracking', label: 'Tracking Centre' },
     { id: 'internship', label: 'Internships' },

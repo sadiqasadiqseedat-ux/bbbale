@@ -12,15 +12,19 @@ import {
   ShieldCheck,
   Building,
   Check,
-  X
+  X,
+  MapPin
 } from 'lucide-react';
 import { storageService, subscribeToStore } from '../../services/storage';
 import { useAuth } from '../../context/AuthContext';
+import { useBranchScope } from '../../utils/branchScope';
 import { Invoice, InvoiceItem, PaymentRecord, ExpenseRecord, Client } from '../../types';
 import { PrintDocumentModal, PrintableDocumentType } from '../common/PrintDocument';
+import { BranchGeneralReportModal } from './BranchGeneralReportModal';
 
 export const BillingView: React.FC = () => {
   const { currentUser, canVerifyPayments, isAccountOfficer, isPrincipalPartner, isHeadOfChamber } = useAuth();
+  const { filterByBranch, currentBranchName, getCreationBranchId } = useBranchScope();
   const canEditInvoices = isPrincipalPartner || isHeadOfChamber;
   const [activeTab, setActiveTab] = useState<'invoices' | 'payments' | 'expenses'>('invoices');
 
@@ -30,6 +34,7 @@ export const BillingView: React.FC = () => {
   const [clients, setClients] = useState<Client[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [printDoc, setPrintDoc] = useState<PrintableDocumentType | null>(null);
+  const [isBranchReportModalOpen, setIsBranchReportModalOpen] = useState(false);
 
   // New Invoice Modal
   const [isAddInvoiceOpen, setIsAddInvoiceOpen] = useState(false);
@@ -62,17 +67,17 @@ export const BillingView: React.FC = () => {
   });
 
   const loadData = () => {
-    setInvoices(storageService.getInvoices());
-    setPayments(storageService.getPayments());
-    setExpenses(storageService.getExpenses());
-    setClients(storageService.getClients());
+    setInvoices(filterByBranch(storageService.getInvoices()));
+    setPayments(filterByBranch(storageService.getPayments()));
+    setExpenses(filterByBranch(storageService.getExpenses()));
+    setClients(filterByBranch(storageService.getClients()));
   };
 
   useEffect(() => {
     loadData();
     const unsub = subscribeToStore(loadData);
     return () => unsub();
-  }, []);
+  }, [currentUser?.branchId]);
 
   const handleCreateInvoice = (e: React.FormEvent) => {
     e.preventDefault();
@@ -82,6 +87,7 @@ export const BillingView: React.FC = () => {
       clientName: invoiceForm.clientName,
       clientEmail: invoiceForm.clientEmail,
       clientPhone: invoiceForm.clientPhone,
+      branchId: getCreationBranchId(),
       items: [
         {
           description: invoiceForm.serviceDescription,
@@ -166,6 +172,7 @@ export const BillingView: React.FC = () => {
       category: expenseForm.category,
       amount: Number(expenseForm.amount),
       description: expenseForm.description,
+      branchId: getCreationBranchId(),
       date: expenseForm.date
     }, currentUser);
 
@@ -195,15 +202,30 @@ export const BillingView: React.FC = () => {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-2xl font-serif font-bold text-slate-900">
-            Accounts, Billing & Financial Audit
-          </h1>
+          <div className="flex items-center space-x-3">
+            <h1 className="text-2xl font-serif font-bold text-slate-900">
+              Accounts, Billing & Financial Audit
+            </h1>
+            <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-900 border border-amber-200">
+              <MapPin className="w-3.5 h-3.5 text-amber-600" />
+              <span>{currentBranchName}</span>
+            </span>
+          </div>
           <p className="text-xs text-slate-500 mt-0.5">
-            Client Invoicing · Audit of Submitted Payments · Verified Receipts · Strict Fund Segregation
+            Client Invoicing · Audit of Submitted Payments · Verified Receipts · Strict Branch Financial Isolation
           </p>
         </div>
 
-        <div className="flex items-center space-x-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {(isHeadOfChamber || isPrincipalPartner) && (
+            <button
+              onClick={() => setIsBranchReportModalOpen(true)}
+              className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-amber-300 border border-amber-500/40 rounded-lg text-xs font-bold shadow-xs flex items-center space-x-1.5 transition-colors"
+            >
+              <Printer className="w-4 h-4 text-amber-400" />
+              <span>Generate Branch General Report</span>
+            </button>
+          )}
           <button
             onClick={() => setIsAddExpenseOpen(true)}
             className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-bold shadow-xs flex items-center space-x-1.5 transition-colors"
@@ -982,6 +1004,13 @@ export const BillingView: React.FC = () => {
         <PrintDocumentModal
           document={printDoc}
           onClose={() => setPrintDoc(null)}
+        />
+      )}
+
+      {isBranchReportModalOpen && (
+        <BranchGeneralReportModal
+          isOpen={isBranchReportModalOpen}
+          onClose={() => setIsBranchReportModalOpen(false)}
         />
       )}
     </div>

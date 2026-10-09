@@ -154,80 +154,116 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
 
       {/* Quick Access Operational Grid */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-10 sm:-mt-14 relative z-20">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 sm:gap-6">
+          {/* Card 1: Consultation Booking */}
           <div 
             onClick={() => onNavigate('consultation')}
-            className="bg-white p-6 rounded-xl border border-slate-200 shadow-md hover:shadow-xl transition-all cursor-pointer group hover:border-amber-500/40"
+            className="relative bg-white p-6 sm:p-7 rounded-2xl border border-slate-200/90 shadow-lg hover:shadow-2xl transition-all duration-300 cursor-pointer group hover:border-amber-500/60 hover:-translate-y-1 flex flex-col justify-between overflow-hidden"
           >
-            <div className="w-12 h-12 rounded-lg bg-amber-50 text-amber-700 flex items-center justify-center mb-4 group-hover:bg-amber-600 group-hover:text-white transition-colors">
-              <FileText className="w-6 h-6" />
+            <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-amber-600 via-amber-400 to-amber-600 opacity-80 group-hover:opacity-100 transition-opacity" />
+            <div>
+              <div className="flex items-center justify-between mb-4">
+                <div className="w-12 h-12 rounded-xl bg-amber-50 text-amber-700 border border-amber-200/60 flex items-center justify-center group-hover:bg-amber-600 group-hover:text-white group-hover:scale-105 transition-all shadow-xs">
+                  <FileText className="w-6 h-6" />
+                </div>
+                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-100/70 text-amber-900 border border-amber-200">
+                  Branch Selection
+                </span>
+              </div>
+              <h3 className="font-serif font-bold text-slate-900 text-base mb-2 group-hover:text-amber-800 transition-colors">
+                Book Legal Consultation
+              </h3>
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Schedule in-person or virtual conferences. Direct branch selection ensures only your chosen branch handles your files.
+              </p>
             </div>
-            <h3 className="font-serif font-bold text-slate-900 text-base mb-1 group-hover:text-amber-800 transition-colors">
-              Book Legal Consultation
-            </h3>
-            <p className="text-xs text-slate-600 leading-relaxed">
-              Schedule in-person or virtual conferences. Immediate consultation code & official invoice generation.
-            </p>
-            <div className="mt-4 flex items-center text-xs font-semibold text-amber-700 group-hover:translate-x-1 transition-transform">
+            <div className="mt-5 pt-3 border-t border-slate-100 flex items-center justify-between text-xs font-semibold text-amber-800 group-hover:text-amber-700">
               <span>Book Appointment</span>
-              <ChevronRight className="w-4 h-4 ml-1" />
+              <ChevronRight className="w-4 h-4 group-hover:translate-x-1.5 transition-transform" />
             </div>
           </div>
 
+          {/* Card 2: Public Tracking Centre */}
           <div 
             onClick={() => onNavigate('tracking')}
-            className="bg-white p-6 rounded-xl border border-slate-200 shadow-md hover:shadow-xl transition-all cursor-pointer group hover:border-blue-500/40"
+            className="relative bg-white p-6 sm:p-7 rounded-2xl border border-slate-200/90 shadow-lg hover:shadow-2xl transition-all duration-300 cursor-pointer group hover:border-blue-500/60 hover:-translate-y-1 flex flex-col justify-between overflow-hidden"
           >
-            <div className="w-12 h-12 rounded-lg bg-blue-50 text-blue-700 flex items-center justify-center mb-4 group-hover:bg-blue-600 group-hover:text-white transition-colors">
-              <Search className="w-6 h-6" />
+            <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-blue-600 via-blue-400 to-blue-600 opacity-80 group-hover:opacity-100 transition-opacity" />
+            <div>
+              <div className="flex items-center justify-between mb-4">
+                <div className="w-12 h-12 rounded-xl bg-blue-50 text-blue-700 border border-blue-200/60 flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white group-hover:scale-105 transition-all shadow-xs">
+                  <Search className="w-6 h-6" />
+                </div>
+                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-blue-100/70 text-blue-900 border border-blue-200">
+                  Real-time Dossier
+                </span>
+              </div>
+              <h3 className="font-serif font-bold text-slate-900 text-base mb-2 group-hover:text-blue-800 transition-colors">
+                Public Tracking Centre
+              </h3>
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Securely track litigation dockets, consultation clearances, tenancy notices, and real-time payment confirmation status.
+              </p>
             </div>
-            <h3 className="font-serif font-bold text-slate-900 text-base mb-1 group-hover:text-blue-800 transition-colors">
-              Public Tracking Centre
-            </h3>
-            <p className="text-xs text-slate-600 leading-relaxed">
-              Securely track your legal consultation, litigation matter, landlord property register, tenancy or invoice.
-            </p>
-            <div className="mt-4 flex items-center text-xs font-semibold text-blue-700 group-hover:translate-x-1 transition-transform">
-              <span>Access Tracking</span>
-              <ChevronRight className="w-4 h-4 ml-1" />
+            <div className="mt-5 pt-3 border-t border-slate-100 flex items-center justify-between text-xs font-semibold text-blue-800 group-hover:text-blue-700">
+              <span>Track Record</span>
+              <ChevronRight className="w-4 h-4 group-hover:translate-x-1.5 transition-transform" />
             </div>
           </div>
 
+          {/* Card 3: Landlord Property Registration & Portfolio */}
           <div 
-            onClick={() => onNavigate('practice')}
-            className="bg-white p-6 rounded-xl border border-slate-200 shadow-md hover:shadow-xl transition-all cursor-pointer group hover:border-emerald-500/40"
+            onClick={() => onNavigate('property-register')}
+            className="relative bg-white p-6 sm:p-7 rounded-2xl border border-slate-200/90 shadow-lg hover:shadow-2xl transition-all duration-300 cursor-pointer group hover:border-emerald-500/60 hover:-translate-y-1 flex flex-col justify-between overflow-hidden"
           >
-            <div className="w-12 h-12 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center mb-4 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
-              <Building2 className="w-6 h-6" />
+            <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-emerald-600 via-emerald-400 to-emerald-600 opacity-80 group-hover:opacity-100 transition-opacity" />
+            <div>
+              <div className="flex items-center justify-between mb-4">
+                <div className="w-12 h-12 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200/60 flex items-center justify-center group-hover:bg-emerald-600 group-hover:text-white group-hover:scale-105 transition-all shadow-xs">
+                  <Building2 className="w-6 h-6" />
+                </div>
+                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-100/70 text-emerald-900 border border-emerald-200">
+                  Landlord Registry
+                </span>
+              </div>
+              <h3 className="font-serif font-bold text-slate-900 text-base mb-2 group-hover:text-emerald-800 transition-colors">
+                Landlord & Property Portal
+              </h3>
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Register property, add multiple units under same Landlord Code, select branch, upload mandatory photos, and verify fee payments.
+              </p>
             </div>
-            <h3 className="font-serif font-bold text-slate-900 text-base mb-1 group-hover:text-emerald-800 transition-colors">
-              Property & Recovery
-            </h3>
-            <p className="text-xs text-slate-600 leading-relaxed">
-              Tenancy management, rent documentation, recovery of premises, deed verification, and real estate litigation.
-            </p>
-            <div className="mt-4 flex items-center text-xs font-semibold text-emerald-700 group-hover:translate-x-1 transition-transform">
-              <span>View Property Services</span>
-              <ChevronRight className="w-4 h-4 ml-1" />
+            <div className="mt-5 pt-3 border-t border-slate-100 flex items-center justify-between text-xs font-semibold text-emerald-800 group-hover:text-emerald-700">
+              <span>Register Property</span>
+              <ChevronRight className="w-4 h-4 group-hover:translate-x-1.5 transition-transform" />
             </div>
           </div>
 
+          {/* Card 4: Law Student Internships */}
           <div 
             onClick={() => onNavigate('internship')}
-            className="bg-white p-6 rounded-xl border border-slate-200 shadow-md hover:shadow-xl transition-all cursor-pointer group hover:border-purple-500/40"
+            className="relative bg-white p-6 sm:p-7 rounded-2xl border border-slate-200/90 shadow-lg hover:shadow-2xl transition-all duration-300 cursor-pointer group hover:border-purple-500/60 hover:-translate-y-1 flex flex-col justify-between overflow-hidden"
           >
-            <div className="w-12 h-12 rounded-lg bg-purple-50 text-purple-700 flex items-center justify-center mb-4 group-hover:bg-purple-600 group-hover:text-white transition-colors">
-              <GraduationCap className="w-6 h-6" />
+            <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-purple-600 via-purple-400 to-purple-600 opacity-80 group-hover:opacity-100 transition-opacity" />
+            <div>
+              <div className="flex items-center justify-between mb-4">
+                <div className="w-12 h-12 rounded-xl bg-purple-50 text-purple-700 border border-purple-200/60 flex items-center justify-center group-hover:bg-purple-600 group-hover:text-white group-hover:scale-105 transition-all shadow-xs">
+                  <GraduationCap className="w-6 h-6" />
+                </div>
+                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-purple-100/70 text-purple-900 border border-purple-200">
+                  NLS Placement
+                </span>
+              </div>
+              <h3 className="font-serif font-bold text-slate-900 text-base mb-2 group-hover:text-purple-800 transition-colors">
+                Student Internships
+              </h3>
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Nigerian Law School externships & university law faculty clinical placements with assigned Chambers counsel mentorship.
+              </p>
             </div>
-            <h3 className="font-serif font-bold text-slate-900 text-base mb-1 group-hover:text-purple-800 transition-colors">
-              Student Internships
-            </h3>
-            <p className="text-xs text-slate-600 leading-relaxed">
-              Nigerian Law School externships & university law faculty student placements with assigned Counsel supervision.
-            </p>
-            <div className="mt-4 flex items-center text-xs font-semibold text-purple-700 group-hover:translate-x-1 transition-transform">
+            <div className="mt-5 pt-3 border-t border-slate-100 flex items-center justify-between text-xs font-semibold text-purple-800 group-hover:text-purple-700">
               <span>Internship Portal</span>
-              <ChevronRight className="w-4 h-4 ml-1" />
+              <ChevronRight className="w-4 h-4 group-hover:translate-x-1.5 transition-transform" />
             </div>
           </div>
         </div>

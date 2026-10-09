@@ -1334,6 +1334,7 @@ export const storageService = {
       clientName: data.fullName,
       clientEmail: data.email,
       clientPhone: data.phone,
+      branchId: data.branchId || 'br-abuja-01',
       consultationCode: code,
       items: [{ description: `Legal Consultation Fee (${data.serviceCategory}) — ${data.method}`, amount: fee }],
       subtotal: fee,
@@ -1442,13 +1443,19 @@ export const storageService = {
   // Payments
   getPayments: (): PaymentRecord[] => memory.payments,
   submitPayment: (data: any): PaymentRecord => {
+    const targetInvoice = memory.invoices.find(inv => 
+      inv.invoiceNumber === data.invoiceNumber || 
+      inv.paymentReference === data.paymentReference
+    );
+    const resolvedBranchId = data.branchId || targetInvoice?.branchId || 'br-abuja-01';
+
     const newPayment: PaymentRecord = {
       id: `pay-${Date.now()}`,
       paymentReference: data.paymentReference,
       invoiceNumber: data.invoiceNumber,
       clientName: data.clientName,
       amount: data.amount,
-      branchId: 'br-abuja-01',
+      branchId: resolvedBranchId,
       paymentMethod: data.paymentMethod,
       paymentDate: new Date().toISOString(),
       status: 'PAYMENT_SUBMITTED',
@@ -1473,7 +1480,7 @@ export const storageService = {
 
     apiFetch('/api/payments', {
       method: 'POST',
-      body: JSON.stringify(data)
+      body: JSON.stringify({ ...data, branchId: resolvedBranchId })
     }).catch(e => console.error('Failed submitting payment to D1:', e));
 
     return newPayment;
@@ -1501,8 +1508,10 @@ export const storageService = {
 
     const verified = memory.payments.find(p => p.id === paymentId);
     if (verified) {
+      let linkedInvoice: Invoice | undefined;
       memory.invoices = memory.invoices.map(inv => {
         if (inv.invoiceNumber === verified.invoiceNumber) {
+          linkedInvoice = inv;
           return {
             ...inv,
             paymentStatus: isApproved ? 'PAYMENT_VERIFIED' : 'UNPAID'
@@ -1523,6 +1532,30 @@ export const storageService = {
         return c;
       });
       setToStorage(STORAGE_KEYS.CONSULTATIONS, memory.consultations);
+
+      // Check if this payment is for property registration fee
+      if (isApproved && (linkedInvoice || verified)) {
+        memory.properties = memory.properties.map(prop => {
+          const isLinked = linkedInvoice?.items.some(item => 
+            item.description.includes(prop.propertyId) || 
+            item.description.includes(prop.name)
+          ) || linkedInvoice?.notes?.includes(prop.propertyId);
+          if (isLinked) {
+            const updatedP: Property = {
+              ...prop,
+              registrationPaymentStatus: 'PAID_CONFIRMED',
+              legalStatus: 'Managed by Chambers'
+            };
+            apiFetch(`/api/properties/${prop.id}`, {
+              method: 'PUT',
+              body: JSON.stringify(updatedP)
+            }).catch(e => console.error(e));
+            return updatedP;
+          }
+          return prop;
+        });
+        setToStorage(STORAGE_KEYS.PROPERTIES, memory.properties);
+      }
     }
     notifySubscribers();
 
@@ -1920,7 +1953,9 @@ export const storageService = {
       ...prop,
       id: `prop-${Date.now()}`,
       propertyId,
-      branchId: prop.branchId || actor.branchId || 'br-abuja-01'
+      branchId: prop.branchId || actor.branchId || 'br-abuja-01',
+      registrationPaymentStatus: prop.registrationPaymentStatus || 'PAID_CONFIRMED',
+      registrationFee: prop.registrationFee || 50000
     };
     memory.properties = [newProp, ...memory.properties];
     setToStorage(STORAGE_KEYS.PROPERTIES, memory.properties);
@@ -1934,10 +1969,265 @@ export const storageService = {
     logAudit(actor, 'ADD_PROPERTY', 'Property', newProp.id, `Registered property: ${newProp.name} (${propertyId})`);
     return newProp;
   },
-  updateProperty: (prop: Property, actor: User): void => {
+  updateProperty: (prop: Property, actor?: User): void => {
     memory.properties = memory.properties.map(p => p.id === prop.id ? prop : p);
     setToStorage(STORAGE_KEYS.PROPERTIES, memory.properties);
     notifySubscribers();
+
+    apiFetch(`/api/properties/${prop.id}`, {
+      method: 'PUT',
+      body: JSON.stringify(prop)
+    }).catch(e => console.error('Failed updating property in D1:', e));
+
+    if (actor) {
+      logAudit(actor, 'UPDATE_PROPERTY', 'Property', prop.id, `Updated property ${prop.name} (${prop.propertyId})`);
+    }
+  },
+
+  registerLandlordWithProperty: (data: {
+    fullName: string;
+    phone: string;
+    email: string;
+    address: string;
+    bankDetails?: string;
+    branchId: string;
+    propertyName: string;
+    propertyType: Property['propertyType'];
+    propertyAddress: string;
+    state: string;
+    lga: string;
+    district: string;
+    totalUnits: number;
+    titleInformation: string;
+    surveyInformation: string;
+    imageUrl: string;
+    registrationFee?: number;
+    notes?: string;
+  }): { landlord: Landlord; property: Property; invoice: Invoice; paymentRef: string } => {
+    const landlordTrackingCode = getNextNumber('landlord', 'LAND');
+    const count = memory.landlords.length + 1;
+    const landlordId = `LND-${String(count).padStart(4, '0')}`;
+    const landlordRecord: Landlord = {
+      id: `lnd-${Date.now()}`,
+      landlordId,
+      branchId: data.branchId,
+      fullName: data.fullName,
+      phone: data.phone,
+      email: data.email,
+      address: data.address,
+      bankDetails: data.bankDetails || '',
+      trackingCode: landlordTrackingCode,
+      dateRegistered: new Date().toISOString()
+    };
+
+    const propertyId = getNextNumber('property', 'PROP');
+    const regFee = data.registrationFee || 50000;
+    const invoiceNumber = getNextNumber('invoice', 'INV');
+    const paymentRef = getNextNumber('payment', 'PAY');
+
+    const propertyRecord: Property = {
+      id: `prop-${Date.now()}`,
+      propertyId,
+      branchId: data.branchId,
+      name: data.propertyName,
+      propertyType: data.propertyType,
+      address: data.propertyAddress,
+      state: data.state,
+      lga: data.lga,
+      district: data.district,
+      landlordId: landlordRecord.id,
+      imageUrl: data.imageUrl,
+      registrationPaymentStatus: 'PENDING_PAYMENT',
+      registrationFee: regFee,
+      totalUnits: data.totalUnits || 1,
+      titleInformation: data.titleInformation || '',
+      surveyInformation: data.surveyInformation || '',
+      legalStatus: 'Managed by Chambers',
+      assignedLawyerId: 'usr-counsel-01',
+      notes: data.notes || ''
+    };
+
+    const newInvoice: Invoice = {
+      id: `inv-${Date.now()}`,
+      invoiceNumber,
+      clientName: `${data.fullName} (Landlord)`,
+      clientEmail: data.email,
+      clientPhone: data.phone,
+      branchId: data.branchId,
+      items: [
+        {
+          description: `Landlord Property Registration & Title Verification Fee — ${data.propertyName} (${propertyId})`,
+          amount: regFee
+        }
+      ],
+      subtotal: regFee,
+      taxAmount: 0,
+      totalAmount: regFee,
+      date: new Date().toISOString().split('T')[0],
+      dueDate: new Date(Date.now() + 86400000 * 7).toISOString().split('T')[0],
+      paymentStatus: 'UNPAID',
+      paymentReference: paymentRef,
+      notes: `Landlord Code: ${landlordTrackingCode} · Property ID: ${propertyId}. Property becomes active and available upon fee confirmation.`
+    };
+
+    memory.landlords = [landlordRecord, ...memory.landlords];
+    memory.properties = [propertyRecord, ...memory.properties];
+    memory.invoices = [newInvoice, ...memory.invoices];
+    setToStorage(STORAGE_KEYS.LANDLORDS, memory.landlords);
+    setToStorage(STORAGE_KEYS.PROPERTIES, memory.properties);
+    setToStorage(STORAGE_KEYS.INVOICES, memory.invoices);
+    notifySubscribers();
+
+    apiFetch('/api/landlords', { method: 'POST', body: JSON.stringify(landlordRecord) }).catch(e => console.error(e));
+    apiFetch('/api/properties', { method: 'POST', body: JSON.stringify(propertyRecord) }).catch(e => console.error(e));
+    apiFetch('/api/invoices', { method: 'POST', body: JSON.stringify(newInvoice) }).catch(e => console.error(e));
+
+    return { landlord: landlordRecord, property: propertyRecord, invoice: newInvoice, paymentRef };
+  },
+
+  addPropertyUnderLandlordCode: (data: {
+    landlordTrackingCode: string;
+    phoneOrEmail: string;
+    propertyName: string;
+    propertyType: Property['propertyType'];
+    propertyAddress: string;
+    state: string;
+    lga: string;
+    district: string;
+    totalUnits: number;
+    titleInformation: string;
+    surveyInformation: string;
+    imageUrl: string;
+    branchId?: string;
+    registrationFee?: number;
+    notes?: string;
+  }): { landlord: Landlord; property: Property; invoice: Invoice; paymentRef: string } => {
+    const normCode = data.landlordTrackingCode.trim().toLowerCase();
+    const normVerify = data.phoneOrEmail.trim().toLowerCase();
+
+    // Find landlord by tracking code, landlordId, or even propertyId registered under them
+    let landlord = memory.landlords.find(l => 
+      (l.trackingCode.toLowerCase() === normCode || l.landlordId.toLowerCase() === normCode) &&
+      (l.email.toLowerCase() === normVerify || l.phone.includes(normVerify))
+    );
+
+    // If searched by a property code (e.g. PROP-2026-XXXX)
+    if (!landlord) {
+      const propMatch = memory.properties.find(p => p.propertyId.toLowerCase() === normCode);
+      if (propMatch) {
+        landlord = memory.landlords.find(l => 
+          l.id === propMatch.landlordId && 
+          (l.email.toLowerCase() === normVerify || l.phone.includes(normVerify))
+        );
+      }
+    }
+
+    if (!landlord) {
+      throw new Error('Landlord record not found. Please verify your Landlord / Property Code and registered Phone or Email.');
+    }
+
+    const effectiveBranchId = data.branchId || landlord.branchId || 'br-abuja-01';
+    const propertyId = getNextNumber('property', 'PROP');
+    const regFee = data.registrationFee || 50000;
+    const invoiceNumber = getNextNumber('invoice', 'INV');
+    const paymentRef = getNextNumber('payment', 'PAY');
+
+    const propertyRecord: Property = {
+      id: `prop-${Date.now()}`,
+      propertyId,
+      branchId: effectiveBranchId,
+      name: data.propertyName,
+      propertyType: data.propertyType,
+      address: data.propertyAddress,
+      state: data.state,
+      lga: data.lga,
+      district: data.district,
+      landlordId: landlord.id,
+      imageUrl: data.imageUrl,
+      registrationPaymentStatus: 'PENDING_PAYMENT',
+      registrationFee: regFee,
+      totalUnits: data.totalUnits || 1,
+      titleInformation: data.titleInformation || '',
+      surveyInformation: data.surveyInformation || '',
+      legalStatus: 'Managed by Chambers',
+      assignedLawyerId: 'usr-counsel-01',
+      notes: data.notes || ''
+    };
+
+    const newInvoice: Invoice = {
+      id: `inv-${Date.now()}`,
+      invoiceNumber,
+      clientName: `${landlord.fullName} (Landlord)`,
+      clientEmail: landlord.email,
+      clientPhone: landlord.phone,
+      branchId: effectiveBranchId,
+      items: [
+        {
+          description: `Landlord Additional Property Registration Fee — ${data.propertyName} (${propertyId})`,
+          amount: regFee
+        }
+      ],
+      subtotal: regFee,
+      taxAmount: 0,
+      totalAmount: regFee,
+      date: new Date().toISOString().split('T')[0],
+      dueDate: new Date(Date.now() + 86400000 * 7).toISOString().split('T')[0],
+      paymentStatus: 'UNPAID',
+      paymentReference: paymentRef,
+      notes: `Registered under Landlord Code: ${landlord.trackingCode}. Property ID: ${propertyId}. Property becomes active and available upon fee confirmation.`
+    };
+
+    memory.properties = [propertyRecord, ...memory.properties];
+    memory.invoices = [newInvoice, ...memory.invoices];
+    setToStorage(STORAGE_KEYS.PROPERTIES, memory.properties);
+    setToStorage(STORAGE_KEYS.INVOICES, memory.invoices);
+    notifySubscribers();
+
+    apiFetch('/api/properties', { method: 'POST', body: JSON.stringify(propertyRecord) }).catch(e => console.error(e));
+    apiFetch('/api/invoices', { method: 'POST', body: JSON.stringify(newInvoice) }).catch(e => console.error(e));
+
+    return { landlord, property: propertyRecord, invoice: newInvoice, paymentRef };
+  },
+
+  confirmPropertyRegistrationPayment: (propertyId: string, actor: User, notes?: string): void => {
+    const property = memory.properties.find(p => p.id === propertyId || p.propertyId === propertyId);
+    if (!property) return;
+
+    const updatedProperty: Property = {
+      ...property,
+      registrationPaymentStatus: 'PAID_CONFIRMED',
+      legalStatus: 'Managed by Chambers'
+    };
+
+    memory.properties = memory.properties.map(p => p.id === property.id ? updatedProperty : p);
+    setToStorage(STORAGE_KEYS.PROPERTIES, memory.properties);
+
+    // Also check if there's an associated invoice for this property registration
+    const matchedInvoice = memory.invoices.find(inv => 
+      inv.items.some(it => it.description.includes(property.propertyId) || it.description.includes(property.name)) ||
+      inv.notes?.includes(property.propertyId)
+    );
+    if (matchedInvoice) {
+      const updatedInvoice: Invoice = {
+        ...matchedInvoice,
+        paymentStatus: 'PAYMENT_VERIFIED'
+      };
+      memory.invoices = memory.invoices.map(inv => inv.id === matchedInvoice.id ? updatedInvoice : inv);
+      setToStorage(STORAGE_KEYS.INVOICES, memory.invoices);
+      apiFetch(`/api/invoices/${matchedInvoice.id}`, {
+        method: 'PUT',
+        body: JSON.stringify(updatedInvoice)
+      }).catch(e => console.error(e));
+    }
+
+    notifySubscribers();
+
+    apiFetch(`/api/properties/${property.id}`, {
+      method: 'PUT',
+      body: JSON.stringify(updatedProperty)
+    }).catch(e => console.error('Failed confirming property payment in D1:', e));
+
+    logAudit(actor, 'CONFIRM_PROPERTY_PAYMENT', 'Property', property.id, `Confirmed registration payment for ${property.name} (${property.propertyId}). Property is now active and available.`);
   },
 
   // Landlords

@@ -685,6 +685,9 @@ export async function handleApiRequest(
             propertyId: p.property_id,
             branchId: p.branch_id,
             propertyType: p.property_type,
+            imageUrl: p.image_url || '',
+            registrationPaymentStatus: p.registration_payment_status || 'PAID_CONFIRMED',
+            registrationFee: p.registration_fee !== undefined ? Number(p.registration_fee) : 50000,
             landlordId: p.landlord_id,
             totalUnits: p.total_units,
             titleInformation: p.title_information,
@@ -698,6 +701,7 @@ export async function handleApiRequest(
           landlords: (landlords.results || []).map(l => ({
             ...l,
             landlordId: l.landlord_id,
+            branchId: l.branch_id,
             fullName: l.full_name,
             bankDetails: l.bank_details,
             trackingCode: l.tracking_code,
@@ -1772,7 +1776,7 @@ export async function handleApiRequest(
     // --------------------------------------------------------------------------
     // 8. PROPERTIES, LANDLORDS, UNITS, TENANTS & QUIT NOTICES
     // --------------------------------------------------------------------------
-    if (path === '/api/properties') {
+    if (path === '/api/properties' || path.startsWith('/api/properties/')) {
       if (request.method === 'GET') {
         const rows = await db.prepare('SELECT * FROM properties ORDER BY created_at DESC').all<any>();
         return jsonResponse({ success: true, properties: rows.results || [] });
@@ -1785,14 +1789,15 @@ export async function handleApiRequest(
 
         await db.prepare(
           `INSERT INTO properties 
-           (id, property_id, branch_id, name, property_type, address, state, lga, district, landlord_id, total_units, title_information, survey_information, legal_status, assigned_lawyer_id, related_client_id, notes)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           (id, property_id, branch_id, name, property_type, address, state, lga, district, landlord_id, total_units, title_information, survey_information, legal_status, assigned_lawyer_id, related_client_id, notes, image_url, registration_payment_status, registration_fee)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         ).bind(
           id, propertyId, body.branchId || 'br-abuja-01', body.name, body.propertyType || 'Commercial Building',
           body.address, body.state || 'FCT', body.lga || 'AMAC', body.district || 'CBD', body.landlordId,
           body.totalUnits || 1, body.titleInformation || '', body.surveyInformation || '',
           body.legalStatus || 'Managed by Chambers', body.assignedLawyerId || 'usr-counsel-01',
-          body.relatedClientId || null, body.notes || ''
+          body.relatedClientId || null, body.notes || '', body.imageUrl || null,
+          body.registrationPaymentStatus || 'PAID_CONFIRMED', body.registrationFee !== undefined ? Number(body.registrationFee) : 50000
         ).run();
 
         const auth = await getAuthUser(request, db);
@@ -1800,6 +1805,35 @@ export async function handleApiRequest(
           await logAudit(db, auth.user.id, auth.user.name, auth.user.role, 'ADD_PROPERTY', 'Property', id, `Registered property: ${body.name} (${propertyId})`);
         }
         return jsonResponse({ success: true, propertyId, id });
+      }
+
+      if (request.method === 'PUT') {
+        const id = path.split('/')[3];
+        const body = await request.json() as any;
+        
+        await db.prepare(
+          `UPDATE properties SET
+            name = COALESCE(?, name),
+            property_type = COALESCE(?, property_type),
+            address = COALESCE(?, address),
+            state = COALESCE(?, state),
+            lga = COALESCE(?, lga),
+            district = COALESCE(?, district),
+            legal_status = COALESCE(?, legal_status),
+            registration_payment_status = COALESCE(?, registration_payment_status),
+            image_url = COALESCE(?, image_url),
+            notes = COALESCE(?, notes),
+            total_units = COALESCE(?, total_units)
+           WHERE id = ? OR property_id = ?`
+        ).bind(
+          body.name ?? null, body.propertyType ?? null, body.address ?? null,
+          body.state ?? null, body.lga ?? null, body.district ?? null,
+          body.legalStatus ?? null, body.registrationPaymentStatus ?? null,
+          body.imageUrl ?? null, body.notes ?? null, body.totalUnits ?? null,
+          id, id
+        ).run();
+
+        return jsonResponse({ success: true, id });
       }
     }
 
@@ -1817,11 +1851,11 @@ export async function handleApiRequest(
         const id = body.id || `lnd-${Date.now()}`;
 
         await db.prepare(
-          `INSERT INTO landlords (id, landlord_id, full_name, phone, email, address, bank_details, tracking_code, date_registered)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
+          `INSERT INTO landlords (id, landlord_id, full_name, phone, email, address, bank_details, tracking_code, branch_id, date_registered)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
         ).bind(
           id, landlordId, body.fullName, body.phone, body.email, body.address,
-          body.bankDetails || '', trackingCode
+          body.bankDetails || '', trackingCode, body.branchId || 'br-abuja-01'
         ).run();
 
         return jsonResponse({ success: true, landlordId, trackingCode, id });
