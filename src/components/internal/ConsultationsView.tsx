@@ -58,14 +58,14 @@ export const ConsultationsView: React.FC = () => {
     setSelectedConsultation(updated);
   };
 
-  const handleConvertToMatter = (e: React.FormEvent) => {
+  const handleConvertToMatter = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedConsultation || !currentUser || !matterTitle) return;
 
     // Check or create client
     let client = storageService.getClients().find(c => c.email.toLowerCase() === selectedConsultation.email.toLowerCase());
     if (!client) {
-      client = storageService.addClient({
+      client = await storageService.addClient({
         fullName: selectedConsultation.fullName,
         clientType: 'Individual',
         phone: selectedConsultation.phone,
@@ -79,6 +79,8 @@ export const ConsultationsView: React.FC = () => {
         isActive: true
       }, currentUser);
     }
+
+    if (!client) return;
 
     const newMatter = storageService.addMatter({
       title: matterTitle,

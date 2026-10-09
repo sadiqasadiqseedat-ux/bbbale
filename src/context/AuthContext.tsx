@@ -13,8 +13,6 @@ interface AuthContextType {
   users: User[];
   login: (identifier: string, password: string, rememberMe?: boolean) => Promise<{ success: boolean; error?: string; requiresPasswordChange?: boolean }>;
   logout: () => void;
-  switchAccount: (userId: string) => void;
-  switchRole: (role: UserRole) => void;
   updateAvailability: (status: AvailabilityStatus) => void;
   changePassword: (currentPassword: string, newPassword: string) => Promise<{ success: boolean; error?: string }>;
   requestPasswordReset: (identifier: string) => { success: boolean; message: string; resetToken?: string };
@@ -148,32 +146,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setSession(null);
   };
 
-  const switchAccount = (userId: string) => {
-    const target = storageService.getUserById(userId);
-    if (!target) return;
-    const session: UserSession = {
-      userId: target.id,
-      token: `session-${Date.now()}`,
-      role: target.role,
-      branchId: target.branchId,
-      rememberMe: true,
-      expiresAt: new Date(Date.now() + 86400000).toISOString(),
-      lastActiveAt: new Date().toISOString()
-    };
-    storageService.setUserSession(session);
-    setCurrentUser(target);
-    setSession(session);
-    setActiveBranchIdState(target.role === 'PRINCIPAL_PARTNER' ? storageService.getActiveBranchId() : target.branchId);
-    logAudit(target, 'SWITCH_ACCOUNT', 'Session', target.id, `User session switched to ${target.name} (${target.role})`);
-  };
-
-  const switchRole = (role: UserRole) => {
-    const allUsers = storageService.getUsers();
-    const target = allUsers.find(u => u.role === role);
-    if (target) {
-      switchAccount(target.id);
-    }
-  };
+  // SECURITY FIX: switchAccount and switchRole removed.
+  // These functions allowed any authenticated user to impersonate any other user
+  // by creating a fake session token without server-side verification.
+  // Account switching must now go through proper server-side authentication (login).
 
   const updateAvailability = (status: AvailabilityStatus) => {
     if (!currentUser) return;
@@ -246,8 +222,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         users,
         login,
         logout,
-        switchAccount,
-        switchRole,
         updateAvailability,
         changePassword,
         requestPasswordReset,

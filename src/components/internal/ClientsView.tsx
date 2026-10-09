@@ -58,46 +58,51 @@ export const ClientsView: React.FC = () => {
     return () => unsub();
   }, []);
 
-  const handleCreateClient = (e: React.FormEvent) => {
+  const handleCreateClient = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.fullName || !formData.phone || !formData.email || !currentUser) return;
 
-    const newClient = storageService.addClient({
-      fullName: formData.fullName,
-      organization: formData.organization || undefined,
-      clientType: formData.clientType,
-      phone: formData.phone,
-      email: formData.email,
-      address: formData.address,
-      state: formData.state,
-      lga: formData.lga,
-      identificationType: formData.identificationType,
-      identificationNumber: formData.identificationNumber,
-      branchId: formData.branchId,
-      assignedLawyerId: formData.assignedLawyerId,
-      conflictCheckStatus: 'Pending',
-      conflictCheckNotes: 'Pending formal conflict clearance by Counsel against opposing party records.',
-      isActive: true,
-      confidentialNotes: formData.confidentialNotes
-    }, currentUser);
+    try {
+      const newClient = await storageService.addClient({
+        fullName: formData.fullName,
+        organization: formData.organization || undefined,
+        clientType: formData.clientType,
+        phone: formData.phone,
+        email: formData.email,
+        address: formData.address,
+        state: formData.state,
+        lga: formData.lga,
+        identificationType: formData.identificationType,
+        identificationNumber: formData.identificationNumber,
+        branchId: formData.branchId,
+        assignedLawyerId: formData.assignedLawyerId,
+        conflictCheckStatus: 'Pending',
+        conflictCheckNotes: 'Pending formal conflict clearance by Counsel against opposing party records.',
+        isActive: true,
+        confidentialNotes: formData.confidentialNotes
+      }, currentUser);
 
-    setIsAddModalOpen(false);
-    setSelectedClient(newClient);
-    setFormData({
-      fullName: '',
-      organization: '',
-      clientType: 'Individual',
-      phone: '',
-      email: '',
-      address: '',
-      state: 'FCT',
-      lga: 'Abuja Municipal (AMAC)',
-      identificationType: 'National Identity Number (NIN)',
-      identificationNumber: '',
-      branchId: 'br-abuja-01',
-      assignedLawyerId: 'usr-counsel-01',
-      confidentialNotes: ''
-    });
+      setIsAddModalOpen(false);
+      setSelectedClient(newClient);
+      setFormData({
+        fullName: '',
+        organization: '',
+        clientType: 'Individual',
+        phone: '',
+        email: '',
+        address: '',
+        state: 'FCT',
+        lga: 'Abuja Municipal (AMAC)',
+        identificationType: 'National Identity Number (NIN)',
+        identificationNumber: '',
+        branchId: 'br-abuja-01',
+        assignedLawyerId: 'usr-counsel-01',
+        confidentialNotes: ''
+      });
+    } catch (err) {
+      console.error('Failed to create client:', err);
+      alert('Failed to register client. Please try again.');
+    }
   };
 
   const handlePerformConflictCheck = (status: 'Passed' | 'Flagged', notes: string) => {
