@@ -476,6 +476,19 @@ export interface InvoiceItem {
   amount: number;
 }
 
+/**
+ * Explicit purpose codes recorded on an invoice so the verification flow knows
+ * exactly what a payment settles — never inferred from invoice descriptions.
+ */
+export type InvoicePurpose =
+  | 'CONSULTATION_FEE'
+  | 'NEW_LANDLORD_PROPERTY_REGISTRATION'
+  | 'ADDITIONAL_PROPERTY_REGISTRATION'
+  | 'GENERAL_BILLING';
+
+/** The kind of paid service an invoice/payment settles. */
+export type PaymentServiceType = 'CONSULTATION' | 'PROPERTY' | 'GENERAL';
+
 export interface Invoice {
   id: string;
   invoiceNumber: string;
@@ -487,6 +500,13 @@ export interface Invoice {
   branchId?: string;
   consultationId?: string;
   consultationCode?: string;
+  /** Explicit purpose of the invoice (InvoicePurpose). */
+  purpose?: InvoicePurpose;
+  /** Explicit service relationship used during payment verification. */
+  serviceType?: PaymentServiceType;
+  serviceRef?: string;
+  propertyId?: string;
+  landlordId?: string;
   items: InvoiceItem[];
   subtotal: number;
   taxAmount: number;
@@ -506,6 +526,11 @@ export interface PaymentRecord {
   id: string;
   paymentReference: string;
   invoiceNumber: string;
+  /** invoices.id this payment settles (explicit relationship). */
+  invoiceId?: string;
+  /** Paid-service link copied from the invoice at submission time. */
+  serviceType?: PaymentServiceType;
+  serviceRef?: string;
   clientName: string;
   amount: number;
   branchId?: string;

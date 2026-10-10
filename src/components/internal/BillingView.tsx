@@ -51,6 +51,8 @@ export const BillingView: React.FC = () => {
   // Verify Payment Modal
   const [selectedPaymentToVerify, setSelectedPaymentToVerify] = useState<PaymentRecord | null>(null);
   const [verificationNotes, setVerificationNotes] = useState('');
+  const [verifyError, setVerifyError] = useState<string | null>(null);
+  const [isVerifying, setIsVerifying] = useState(false);
 
   // Edit Invoice Modal
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
@@ -149,18 +151,32 @@ export const BillingView: React.FC = () => {
     }
   };
 
-  const handleVerifyPayment = (isApproved: boolean) => {
-    if (!selectedPaymentToVerify || !currentUser) return;
+  const handleVerifyPayment = async (isApproved: boolean) => {
+    if (!selectedPaymentToVerify || !currentUser || isVerifying) return;
 
-    storageService.verifyPayment(
-      selectedPaymentToVerify.id,
-      isApproved,
-      verificationNotes || (isApproved ? 'Bank statement audit verified. Transaction credited.' : 'Transaction ref invalid.'),
-      currentUser
-    );
+    setIsVerifying(true);
+    setVerifyError(null);
+    try {
+      // Await the authoritative server decision before closing the modal.
+      await storageService.verifyPayment(
+        selectedPaymentToVerify.id,
+        isApproved,
+        verificationNotes || (isApproved ? 'Bank statement audit verified. Transaction credited.' : 'Transaction ref invalid.'),
+        currentUser
+      );
+      setSelectedPaymentToVerify(null);
+      setVerificationNotes('');
+    } catch (err: any) {
+      setVerifyError(err?.message || 'Failed to record the payment decision. Please retry.');
+    } finally {
+      setIsVerifying(false);
+    }
+  };
 
+  const closeVerifyModal = () => {
     setSelectedPaymentToVerify(null);
     setVerificationNotes('');
+    setVerifyError(null);
   };
 
   const handleCreateExpense = (e: React.FormEvent) => {
@@ -546,27 +562,37 @@ export const BillingView: React.FC = () => {
               />
             </div>
 
+            {verifyError && (
+              <div className="flex items-start space-x-2 p-2.5 rounded border border-red-300 bg-red-50 text-red-800 text-xs">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{verifyError}</span>
+              </div>
+            )}
+
             <div className="flex justify-end space-x-2 pt-2 border-t">
               <button
                 type="button"
-                onClick={() => setSelectedPaymentToVerify(null)}
-                className="px-3 py-2 border rounded font-semibold text-xs text-slate-700"
+                onClick={closeVerifyModal}
+                disabled={isVerifying}
+                className="px-3 py-2 border rounded font-semibold text-xs text-slate-700 disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={() => handleVerifyPayment(false)}
-                className="px-3.5 py-2 bg-red-700 hover:bg-red-800 text-white rounded text-xs font-bold"
+                disabled={isVerifying}
+                className="px-3.5 py-2 bg-red-700 hover:bg-red-800 text-white rounded text-xs font-bold disabled:opacity-50"
               >
-                Reject Payment
+                {isVerifying ? 'Processing…' : 'Reject Payment'}
               </button>
               <button
                 type="button"
                 onClick={() => handleVerifyPayment(true)}
-                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-bold"
+                disabled={isVerifying}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-bold disabled:opacity-50"
               >
-                Verify & Issue Receipt
+                {isVerifying ? 'Processing…' : 'Verify & Issue Receipt'}
               </button>
             </div>
           </div>
@@ -954,9 +980,15 @@ export const BillingView: React.FC = () => {
                   >
                     <option value="UNPAID">UNPAID</option>
                     <option value="PAYMENT_SUBMITTED">PAYMENT SUBMITTED</option>
-                    <option value="PAYMENT_VERIFIED">PAYMENT VERIFIED</option>
+                    {/* PAYMENT_VERIFIED is set only by authorized payment verification */}
+                    {editForm.paymentStatus === 'PAYMENT_VERIFIED' && (
+                      <option value="PAYMENT_VERIFIED">PAYMENT VERIFIED</option>
+                    )}
                     <option value="CANCELLED">CANCELLED</option>
                   </select>
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    An invoice is marked PAID only through authorized payment verification.
+                  </p>
                 </div>
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">Payment Method:</label>

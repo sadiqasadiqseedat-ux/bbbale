@@ -128,6 +128,7 @@ export const LandlordPropertyPortalPage: React.FC<LandlordPropertyPortalPageProp
   const [paymentProofDataUrl, setPaymentProofDataUrl] = useState('');
   const [paymentSubmitting, setPaymentSubmitting] = useState(false);
   const [paymentSubmitted, setPaymentSubmitted] = useState(false);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
 
   // Image upload handler
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -173,9 +174,9 @@ export const LandlordPropertyPortalPage: React.FC<LandlordPropertyPortalPageProp
     }
 
     setIsSubmitting(true);
-    setTimeout(() => {
+    setTimeout(async () => {
       try {
-        const result = storageService.registerLandlordWithProperty({
+        const result = await storageService.registerLandlordWithProperty({
           fullName: newForm.fullName.trim(),
           phone: newForm.phone.trim(),
           email: newForm.email.trim(),
@@ -266,9 +267,9 @@ export const LandlordPropertyPortalPage: React.FC<LandlordPropertyPortalPageProp
     }
 
     setIsSubmitting(true);
-    setTimeout(() => {
+    setTimeout(async () => {
       try {
-        const result = storageService.addPropertyUnderLandlordCode({
+        const result = await storageService.addPropertyUnderLandlordCode({
           landlordTrackingCode: existingLandlordVerified.trackingCode,
           phoneOrEmail: existingLandlordVerified.email || existingLandlordVerified.phone,
           propertyName: existingForm.propertyName.trim(),
