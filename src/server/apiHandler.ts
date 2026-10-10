@@ -1,4 +1,4 @@
-import { WorkerEnv, ExecutionContext, D1Database } from '../types/worker';
+import { WorkerEnv, ExecutionContext, D1Database, D1PreparedStatement } from '../types/worker';
 
 export type Env = WorkerEnv;
 import { 
@@ -35,6 +35,7 @@ import {
   MAX_FAILED_LOGIN_ATTEMPTS, LOGIN_LOCKOUT_MINUTES
 } from './auth';
 import type { InvoicePurpose, PaymentServiceType } from '../types';
+import { buildVerificationDispatch, isInvoicePurposeType, resolvePurposeType, type InvoicePurposeType } from './paymentDispatch';
 
 // ---------------------------------------------------------------------------
 // PAYMENT WORKFLOW CONSTANTS (single source of truth)
@@ -937,6 +938,8 @@ export async function handleApiRequest(
             consultationId: inv.consultation_id,
             consultationCode: inv.consultation_code,
             purpose: inv.purpose || null,
+            purposeType: inv.purpose_type || null,
+            purposeEntityId: inv.purpose_entity_id || null,
             serviceType: inv.service_type || null,
             serviceRef: inv.service_ref || null,
             propertyId: inv.property_id || null,
@@ -1634,14 +1637,26 @@ export async function handleApiRequest(
           ? body.paymentStatus
           : INVOICE_STATUS_UNPAID;
 
+        // Tag the invoice with its canonical purpose so verification can dispatch
+        // to the entity the invoice settles. Explicit body value wins; otherwise
+        // derive it from the legacy purpose / service type.
+        const purposeType: InvoicePurposeType = isInvoicePurposeType(body.purposeType)
+          ? (String(body.purposeType).trim().toUpperCase() as InvoicePurposeType)
+          : resolvePurposeType({ purpose: body.purpose, service_type: body.serviceType });
+        const purposeEntityId: string | null =
+          body.purposeEntityId || body.serviceRef
+          || (body.serviceType === 'PROPERTY' ? body.propertyId : null)
+          || (body.serviceType === 'CONSULTATION' ? body.consultationId : null)
+          || null;
+
         await db.prepare(
           `INSERT INTO invoices 
-           (id, invoice_number, client_id, client_name, client_email, client_phone, matter_id, branch_id, consultation_id, consultation_code, purpose, service_type, service_ref, property_id, landlord_id, items, subtotal, tax_amount, total_amount, date, due_date, payment_status, approval_status, payment_reference, payment_method, notes)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           (id, invoice_number, client_id, client_name, client_email, client_phone, matter_id, branch_id, consultation_id, consultation_code, purpose, purpose_type, purpose_entity_id, service_type, service_ref, property_id, landlord_id, items, subtotal, tax_amount, total_amount, date, due_date, payment_status, approval_status, payment_reference, payment_method, notes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         ).bind(
           id, invoiceNumber, body.clientId || null, body.clientName, body.clientEmail, body.clientPhone,
           body.matterId || null, body.branchId || 'br-abuja-01', body.consultationId || null, body.consultationCode || null,
-          body.purpose || 'GENERAL_BILLING', body.serviceType || 'GENERAL', body.serviceRef || null,
+          body.purpose || 'GENERAL_BILLING', purposeType, purposeEntityId, body.serviceType || 'GENERAL', body.serviceRef || null,
           body.propertyId || null, body.landlordId || null,
           JSON.stringify(body.items || []), body.subtotal || body.totalAmount, body.taxAmount || 0,
           body.totalAmount, body.date || new Date().toISOString().split('T')[0], body.dueDate,
@@ -1896,30 +1911,39 @@ export async function handleApiRequest(
         : await db.prepare('SELECT * FROM invoices WHERE invoice_number = ?').bind(payment.invoice_number).first<any>();
 
       if (isApproved) {
+        // --- One atomic transaction for the whole verification -----------------
+        // Payment → PAYMENT_VERIFIED, invoice → PAYMENT_VERIFIED, durable receipt
+        // issued, the invoice's PURPOSE target-entity activated, and the audit
+        // trail written — all inside a single `db.batch`. In production D1 a batch
+        // is atomic; the dev D1 shim (src/server/devD1Adapter.ts) runs the same
+        // statements in order. A failure rolls the whole verification back, so a
+        // status can never be flipped without its receipt/dispatch/audit.
         const receiptNumber = await getNextNumber(db, 'receipt', 'REC');
 
-        // Guard the state transition atomically: only a payment that is not yet
-        // verified can be moved to verified.
-        const upd = await db.prepare(
-          `UPDATE payments 
-           SET status = ?, receipt_number = ?, verified_by_id = ?, verified_by_name = ?, 
-               verification_date = datetime('now'), verification_notes = ?
-           WHERE id = ? AND status <> ?`
-        ).bind(PAYMENT_STATUS_VERIFIED, receiptNumber, auth.user.id, auth.user.name, notes, paymentId, PAYMENT_STATUS_VERIFIED).run();
-
-        if (!upd?.meta?.changes) {
-          const fresh = await db.prepare('SELECT receipt_number FROM payments WHERE id = ?').bind(paymentId).first<any>();
-          return jsonResponse({ success: true, alreadyVerified: true, receiptNumber: fresh?.receipt_number || null, status: PAYMENT_STATUS_VERIFIED });
-        }
-
-        // Persist the durable receipt exactly once per payment submission.
-        const existingReceipt = await db.prepare('SELECT receipt_number FROM receipts WHERE payment_reference = ?').bind(payment.payment_reference).first<any>();
+        // Reuse an existing receipt for this payment submission (idempotent retry).
+        const existingReceipt = await db.prepare(
+          'SELECT receipt_number FROM receipts WHERE payment_reference = ?'
+        ).bind(payment.payment_reference).first<any>();
         const finalReceiptNumber = existingReceipt?.receipt_number || receiptNumber;
-        if (finalReceiptNumber !== receiptNumber) {
-          await db.prepare('UPDATE payments SET receipt_number = ? WHERE id = ?').bind(finalReceiptNumber, paymentId).run();
-        }
-        if (!existingReceipt) {
-          await db.prepare(
+
+        // Resolve the invoice PURPOSE and build the target-entity dispatch + audit.
+        const dispatch = buildVerificationDispatch(db, {
+          invoice,
+          payment,
+          actor: { id: auth.user.id, name: auth.user.name, role: auth.user.role },
+          receiptNumber: finalReceiptNumber
+        });
+
+        const statements: D1PreparedStatement[] = [
+          // 1. Flip the payment — guarded so a second/concurrent verify is a no-op.
+          db.prepare(
+            `UPDATE payments 
+             SET status = ?, receipt_number = ?, verified_by_id = ?, verified_by_name = ?, 
+                 verification_date = datetime('now'), verification_notes = ?
+             WHERE id = ? AND status <> ?`
+          ).bind(PAYMENT_STATUS_VERIFIED, finalReceiptNumber, auth.user.id, auth.user.name, notes, paymentId, PAYMENT_STATUS_VERIFIED),
+          // 2. Issue the durable receipt exactly once per payment submission.
+          db.prepare(
             `INSERT OR IGNORE INTO receipts
              (id, receipt_number, payment_reference, invoice_number, client_name, amount, payment_method, issued_date, issued_by_id, issued_by_name)
              VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?)`
@@ -1928,34 +1952,28 @@ export async function handleApiRequest(
             finalReceiptNumber, payment.payment_reference, payment.invoice_number,
             payment.client_name, Number(payment.amount), payment.payment_method || 'Bank Transfer',
             auth.user.id, auth.user.name
-          ).run();
+          ),
+          // 3. Settle the invoice (never overwrite a CANCELLED invoice).
+          db.prepare(
+            `UPDATE invoices SET payment_status = ? WHERE invoice_number = ? AND payment_status <> 'CANCELLED'`
+          ).bind(PAYMENT_STATUS_VERIFIED, payment.invoice_number),
+          // 4 + 5. Purpose-based target-entity dispatch + audit trail.
+          ...dispatch.statements
+        ];
+
+        let results: any[];
+        try {
+          results = await db.batch(statements);
+        } catch (err: any) {
+          console.error('Payment verification transaction failed:', err);
+          return errorResponse('The payment could not be verified. No changes were applied; please retry.', 500);
         }
 
-        // Settle the invoice (guard: never overwrite a CANCELLED invoice).
-        await db.prepare(
-          `UPDATE invoices SET payment_status = ? WHERE invoice_number = ? AND payment_status <> 'CANCELLED'`
-        ).bind(PAYMENT_STATUS_VERIFIED, payment.invoice_number).run();
-
-        // Activate ONLY the explicitly linked service.
-        const serviceType = payment.service_type || invoice?.service_type;
-        const serviceRef = payment.service_ref || invoice?.service_ref || (serviceType === 'PROPERTY' ? invoice?.property_id : undefined);
-        if (serviceType === 'CONSULTATION') {
-          const where = serviceRef ? 'id = ?' : 'invoice_number = ?';
-          await db.prepare(
-            `UPDATE consultations SET status = 'Payment Verified',
-                client_visible_update = ?
-             WHERE ${where}`
-          ).bind(`Payment verified by Accounts. Receipt ${finalReceiptNumber} issued. Your consultation schedule is confirmed.`, serviceRef || payment.invoice_number).run();
-        } else if (serviceType === 'PROPERTY' && serviceRef) {
-          await db.prepare(
-            `UPDATE properties SET registration_payment_status = ?, legal_status = 'Managed by Chambers' WHERE id = ? OR property_id = ?`
-          ).bind(PROPERTY_PAYMENT_CONFIRMED, serviceRef, serviceRef).run();
+        // A zero-row guard means this payment was already verified (idempotent).
+        if (!results?.[0]?.meta?.changes) {
+          const fresh = await db.prepare('SELECT receipt_number FROM payments WHERE id = ?').bind(paymentId).first<any>();
+          return jsonResponse({ success: true, alreadyVerified: true, receiptNumber: fresh?.receipt_number || null, status: PAYMENT_STATUS_VERIFIED });
         }
-
-        await logAudit(
-          db, auth.user.id, auth.user.name, auth.user.role, 'VERIFY_PAYMENT', 'Payment', paymentId,
-          `Verified payment of ₦${Number(payment.amount).toLocaleString()} for ${payment.client_name} (invoice ${payment.invoice_number}); receipt ${finalReceiptNumber} issued`
-        );
 
         return jsonResponse({ success: true, receiptNumber: finalReceiptNumber, status: PAYMENT_STATUS_VERIFIED });
       }
@@ -2364,13 +2382,13 @@ export async function handleApiRequest(
           const dueDate = new Date(Date.now() + 86400000 * 7).toISOString().split('T')[0];
           await db.prepare(
             `INSERT INTO invoices 
-             (id, invoice_number, client_name, client_email, client_phone, branch_id, purpose, service_type, service_ref, property_id, landlord_id, items, subtotal, tax_amount, total_amount, date, due_date, payment_status, payment_reference, notes)
-             VALUES (?, ?, ?, ?, ?, ?, 'ADDITIONAL_PROPERTY_REGISTRATION', 'PROPERTY', ?, ?, ?, ?, ?, 0, ?, ?, ?, 'UNPAID', ?, ?)`
+             (id, invoice_number, client_name, client_email, client_phone, branch_id, purpose, purpose_type, purpose_entity_id, service_type, service_ref, property_id, landlord_id, items, subtotal, tax_amount, total_amount, date, due_date, payment_status, payment_reference, notes)
+             VALUES (?, ?, ?, ?, ?, ?, 'ADDITIONAL_PROPERTY_REGISTRATION', 'PROPERTY_ADDITION', ?, 'PROPERTY', ?, ?, ?, ?, ?, 0, ?, ?, ?, 'UNPAID', ?, ?)`
           ).bind(
             invoiceId, invoiceNumber,
             landlord ? `${landlord.full_name} (Landlord)` : `${body.name} (Landlord)`,
             landlord?.email || '', landlord?.phone || '',
-            body.branchId || 'br-abuja-01', id, id, body.landlordId || null,
+            body.branchId || 'br-abuja-01', id, id, id, body.landlordId || null,
             JSON.stringify([{ description: `Property Registration & Documentation Fee — ${body.name} (${propertyId})`, amount: regFee }]),
             regFee, regFee, new Date().toISOString().split('T')[0], dueDate, paymentRef,
             `Property ID: ${propertyId}. The property becomes active only after the registration fee is verified.`
@@ -2621,13 +2639,16 @@ export async function handleApiRequest(
       const paymentRef = await getNextNumber(db, 'payment', 'PAY');
       const invoiceId = `inv-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
       const dueDate = new Date(Date.now() + 86400000 * 7).toISOString().split('T')[0];
+      const purposeType: InvoicePurposeType = purpose === 'NEW_LANDLORD_PROPERTY_REGISTRATION'
+        ? 'PROPERTY_REGISTRATION'
+        : 'PROPERTY_ADDITION';
       await db.prepare(
         `INSERT INTO invoices 
-         (id, invoice_number, client_name, client_email, client_phone, branch_id, purpose, service_type, service_ref, property_id, landlord_id, items, subtotal, tax_amount, total_amount, date, due_date, payment_status, payment_reference, notes)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'PROPERTY', ?, ?, ?, ?, ?, 0, ?, ?, ?, 'UNPAID', ?, ?)`
+         (id, invoice_number, client_name, client_email, client_phone, branch_id, purpose, purpose_type, purpose_entity_id, service_type, service_ref, property_id, landlord_id, items, subtotal, tax_amount, total_amount, date, due_date, payment_status, payment_reference, notes)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'PROPERTY', ?, ?, ?, ?, ?, 0, ?, ?, ?, 'UNPAID', ?, ?)`
       ).bind(
         invoiceId, invoiceNumber, `${landlord.fullName} (Landlord)`, landlord.email, landlord.phone,
-        landlord.branchId || branchId, purpose, propertyRowId, propertyRowId, landlord.id,
+        landlord.branchId || branchId, purpose, purposeType, propertyRowId, propertyRowId, propertyRowId, landlord.id,
         JSON.stringify([{ description: `Property Registration & Title Verification Fee — ${propertyName} (${propertyId})`, amount: regFee }]),
         regFee, regFee, new Date().toISOString().split('T')[0], dueDate, paymentRef,
         `Landlord Code: ${landlord.trackingCode} · Property ID: ${propertyId}. The property becomes active and available only after the registration fee is verified.`
@@ -2995,10 +3016,10 @@ export async function handleApiRequest(
         // to the branch, so branch scoping and verification can resolve it.
         await db.prepare(
           `INSERT INTO invoices 
-           (id, invoice_number, client_name, client_email, client_phone, branch_id, consultation_id, consultation_code, purpose, service_type, service_ref, items, subtotal, tax_amount, total_amount, date, due_date, payment_status, payment_reference, notes)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'CONSULTATION_FEE', 'CONSULTATION', ?, ?, ?, 0, ?, ?, ?, 'UNPAID', ?, ?)`
+           (id, invoice_number, client_name, client_email, client_phone, branch_id, consultation_id, consultation_code, purpose, purpose_type, purpose_entity_id, service_type, service_ref, items, subtotal, tax_amount, total_amount, date, due_date, payment_status, payment_reference, notes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'CONSULTATION_FEE', 'CONSULTATION', ?, 'CONSULTATION', ?, ?, ?, 0, ?, ?, ?, 'UNPAID', ?, ?)`
         ).bind(
-          invId, invoiceNumber, body.fullName, body.email, body.phone, body.branchId || 'br-abuja-01', id, code, id,
+          invId, invoiceNumber, body.fullName, body.email, body.phone, body.branchId || 'br-abuja-01', id, code, id, id,
           JSON.stringify([{ description: `Legal Consultation Fee (${body.serviceCategory}) — ${body.method}`, amount: fee }]),
           fee, fee, new Date().toISOString().split('T')[0], body.preferredDate, paymentRef,
           `Consultation Reference: ${code}. Quote payment reference ${paymentRef} upon transfer.`

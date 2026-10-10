@@ -604,6 +604,21 @@ function getNextNumber(type: string, prefix: string): string {
   return `BBC-${prefix}-2026-${formatted}`;
 }
 
+// Map legacy invoice purpose codes onto the canonical purpose_type used by the
+// payment-verification dispatch (mirrors src/server/paymentDispatch.ts).
+function inferInvoicePurposeType(invoice: Partial<Invoice>): Invoice['purposeType'] {
+  if (invoice.purposeType) return invoice.purposeType;
+  switch (invoice.purpose) {
+    case 'CONSULTATION_FEE': return 'CONSULTATION';
+    case 'NEW_LANDLORD_PROPERTY_REGISTRATION': return 'PROPERTY_REGISTRATION';
+    case 'ADDITIONAL_PROPERTY_REGISTRATION': return 'PROPERTY_ADDITION';
+    default: break;
+  }
+  if (invoice.serviceType === 'CONSULTATION') return 'CONSULTATION';
+  if (invoice.serviceType === 'PROPERTY') return 'PROPERTY_ADDITION';
+  return 'OTHER';
+}
+
 // DISPATCH NOTIFICATION
 export function dispatchNotification(
   title: string,
@@ -1364,6 +1379,8 @@ export const storageService = {
       consultationId: newConsultation.id,
       consultationCode: code,
       purpose: 'CONSULTATION_FEE',
+      purposeType: 'CONSULTATION',
+      purposeEntityId: newConsultation.id,
       serviceType: 'CONSULTATION',
       serviceRef: newConsultation.id,
       items: [{ description: `Legal Consultation Fee (${data.serviceCategory}) — ${data.method}`, amount: fee }],
@@ -1418,6 +1435,8 @@ export const storageService = {
       invoiceNumber,
       paymentReference: paymentRef,
       branchId: invoiceData.branchId || actor.branchId || 'br-abuja-01',
+      purposeType: invoiceData.purposeType || inferInvoicePurposeType(invoiceData),
+      purposeEntityId: invoiceData.purposeEntityId || invoiceData.serviceRef || undefined,
       approvalStatus: 'NONE'
     };
 
@@ -1600,35 +1619,52 @@ export const storageService = {
       );
       setToStorage(STORAGE_KEYS.INVOICES, memory.invoices);
 
-      memory.consultations = memory.consultations.map(c => {
-        if (verified.serviceType) {
-          const isLinkedConsultation = verified.serviceType === 'CONSULTATION' && (!verified.serviceRef || c.id === verified.serviceRef);
-          if (!isLinkedConsultation) return c;
-        } else if (c.invoiceNumber !== verified.invoiceNumber && c.paymentReference !== verified.paymentReference) {
-          return c;
-        }
-        return {
-          ...c,
-          status: isApproved ? 'Payment Verified' : 'Awaiting Payment',
-          clientVisibleUpdate: isApproved
-            ? `Payment verified. Receipt ${receiptNumber} issued.`
-            : `Payment rejected: ${notes}`
-        };
-      });
-      setToStorage(STORAGE_KEYS.CONSULTATIONS, memory.consultations);
+      // Purpose-based dispatch — mirror the server so the UI updates immediately.
+      // The server is authoritative; the periodic sync reconciles anything else.
+      const purposeType = targetInvoice?.purposeType
+        || inferInvoicePurposeType({ serviceType: verified.serviceType });
+      const purposeEntityId = targetInvoice?.purposeEntityId
+        || targetInvoice?.serviceRef
+        || targetInvoice?.propertyId
+        || verified.serviceRef
+        || undefined;
 
-      // Activate ONLY the property explicitly linked to this payment.
-      const propertyRef = (verified.serviceType === 'PROPERTY' ? verified.serviceRef : undefined) ||
-                          targetInvoice?.propertyId ||
-                          (targetInvoice?.serviceType === 'PROPERTY' ? targetInvoice.serviceRef : undefined);
-      if (isApproved && propertyRef) {
+      if (purposeType === 'CONSULTATION') {
+        memory.consultations = memory.consultations.map(c => {
+          const isLinked = purposeEntityId
+            ? (c.id === purposeEntityId || c.invoiceNumber === verified.invoiceNumber)
+            : (c.invoiceNumber === verified.invoiceNumber || c.paymentReference === verified.paymentReference);
+          if (!isLinked) return c;
+          return {
+            ...c,
+            status: isApproved ? 'Payment Verified' : 'Awaiting Payment',
+            clientVisibleUpdate: isApproved
+              ? `Payment verified. Receipt ${receiptNumber} issued.`
+              : `Payment rejected: ${notes}`
+          };
+        });
+        setToStorage(STORAGE_KEYS.CONSULTATIONS, memory.consultations);
+      }
+
+      if ((purposeType === 'PROPERTY_REGISTRATION' || purposeType === 'PROPERTY_ADDITION') && isApproved && purposeEntityId) {
         memory.properties = memory.properties.map(prop =>
-          (prop.id === propertyRef || prop.propertyId === propertyRef)
+          (prop.id === purposeEntityId || prop.propertyId === purposeEntityId)
             ? { ...prop, registrationPaymentStatus: 'PAID_CONFIRMED', legalStatus: 'Managed by Chambers' }
             : prop
         );
         setToStorage(STORAGE_KEYS.PROPERTIES, memory.properties);
       }
+
+      if (purposeType === 'TENANCY_NOTICE' && isApproved && purposeEntityId) {
+        memory.quitNotices = memory.quitNotices.map(q =>
+          (q.id === purposeEntityId || q.quitNoticeId === purposeEntityId)
+            ? { ...q, status: 'Active' as QuitNotice['status'] }
+            : q
+        );
+        setToStorage(STORAGE_KEYS.QUIT_NOTICES, memory.quitNotices);
+      }
+
+      // MATTER_RETAINER and INTERNSHIP are reconciled on the next server sync.
 
       // Add durable receipt to cache if approved
       if (isApproved && receiptNumber) {
@@ -2073,6 +2109,8 @@ export const storageService = {
         clientPhone: landlord?.phone || '',
         branchId: newProp.branchId,
         purpose: 'ADDITIONAL_PROPERTY_REGISTRATION',
+        purposeType: 'PROPERTY_ADDITION',
+        purposeEntityId: newProp.id,
         serviceType: 'PROPERTY',
         serviceRef: newProp.id,
         propertyId: newProp.id,
@@ -2203,6 +2241,8 @@ export const storageService = {
       clientPhone: data.phone,
       branchId: res.property.branchId,
       purpose: 'NEW_LANDLORD_PROPERTY_REGISTRATION',
+      purposeType: 'PROPERTY_REGISTRATION',
+      purposeEntityId: propertyRecord.id,
       serviceType: 'PROPERTY',
       serviceRef: propertyRecord.id,
       propertyId: propertyRecord.id,
@@ -2308,6 +2348,8 @@ export const storageService = {
       clientPhone: landlord.phone,
       branchId: res.property.branchId,
       purpose: 'ADDITIONAL_PROPERTY_REGISTRATION',
+      purposeType: 'PROPERTY_ADDITION',
+      purposeEntityId: propertyRecord.id,
       serviceType: 'PROPERTY',
       serviceRef: propertyRecord.id,
       propertyId: propertyRecord.id,
