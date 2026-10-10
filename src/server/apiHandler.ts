@@ -29,9 +29,28 @@ import {
 import { hashPassword, verifyPassword, generateSalt, generateSecureToken, validatePasswordStrength, needsHashUpgrade } from '../services/crypto';
 import {
   isFirmAdmin, canManageUsers, canManageWebsite, canAssignCases,
-  canVerifyPayments, canManageBilling, isPersonnel, getBranchFilter,
-  filterByBranch, branchFilterClause, MAX_FAILED_LOGIN_ATTEMPTS, LOGIN_LOCKOUT_MINUTES
+  canVerifyPayments, canApplyPaymentCorrection, canManageBilling, isPersonnel, getBranchFilter,
+  filterByBranch, branchFilterClause, PAYMENT_VERIFIER_ROLES,
+  MAX_FAILED_LOGIN_ATTEMPTS, LOGIN_LOCKOUT_MINUTES
 } from './auth';
+import type { InvoicePurpose, PaymentServiceType } from '../types';
+
+// ---------------------------------------------------------------------------
+// PAYMENT WORKFLOW CONSTANTS (single source of truth)
+// ---------------------------------------------------------------------------
+// A submitted receipt/bank reference is proof of submission only. These values
+// are the only states the server will ever write for a payment or invoice.
+const PAYMENT_STATUS_SUBMITTED = 'PAYMENT_SUBMITTED';
+const PAYMENT_STATUS_VERIFIED = 'PAYMENT_VERIFIED';
+const PAYMENT_STATUS_REJECTED = 'REJECTED';
+const INVOICE_STATUS_UNPAID = 'UNPAID';
+
+const PROPERTY_PAYMENT_PENDING = 'PENDING_PAYMENT';
+const PROPERTY_PAYMENT_CONFIRMED = 'PAID_CONFIRMED';
+
+// Maximum accepted length of an uploaded proof document (data-URL or URL) so a
+// single submission cannot exhaust the D1 row budget.
+const MAX_PROOF_LENGTH = 12 * 1024 * 1024;
 
 const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
@@ -831,7 +850,8 @@ export async function handleApiRequest(
             branchId: p.branch_id,
             propertyType: p.property_type,
             imageUrl: p.image_url || '',
-            registrationPaymentStatus: p.registration_payment_status || 'PAID_CONFIRMED',
+            // A missing status must never be reported as paid.
+            registrationPaymentStatus: p.registration_payment_status || PROPERTY_PAYMENT_PENDING,
             registrationFee: p.registration_fee !== undefined ? Number(p.registration_fee) : 50000,
             landlordId: p.landlord_id,
             totalUnits: p.total_units,
@@ -913,6 +933,11 @@ export async function handleApiRequest(
             branchId: inv.branch_id,
             consultationId: inv.consultation_id,
             consultationCode: inv.consultation_code,
+            purpose: inv.purpose || null,
+            serviceType: inv.service_type || null,
+            serviceRef: inv.service_ref || null,
+            propertyId: inv.property_id || null,
+            landlordId: inv.landlord_id || null,
             items: typeof inv.items === 'string' ? JSON.parse(inv.items || '[]') : [],
             taxAmount: inv.tax_amount,
             totalAmount: inv.total_amount,
@@ -929,6 +954,9 @@ export async function handleApiRequest(
             ...p,
             paymentReference: p.payment_reference,
             invoiceNumber: p.invoice_number,
+            invoiceId: p.invoice_id || null,
+            serviceType: p.service_type || null,
+            serviceRef: p.service_ref || null,
             clientName: p.client_name,
             branchId: p.branch_id,
             paymentMethod: p.payment_method,
@@ -1584,16 +1612,24 @@ export async function handleApiRequest(
         const paymentReference = body.paymentReference || await getNextNumber(db, 'payment', 'PAY');
         const id = body.id || `inv-${Date.now()}`;
 
+        // A newly created invoice always starts UNPAID — it can never be created
+        // already verified.
+        const initialStatus = (body.paymentStatus && body.paymentStatus !== PAYMENT_STATUS_VERIFIED)
+          ? body.paymentStatus
+          : INVOICE_STATUS_UNPAID;
+
         await db.prepare(
           `INSERT INTO invoices 
-           (id, invoice_number, client_id, client_name, client_email, client_phone, matter_id, branch_id, consultation_code, items, subtotal, tax_amount, total_amount, date, due_date, payment_status, approval_status, payment_reference, payment_method, notes)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           (id, invoice_number, client_id, client_name, client_email, client_phone, matter_id, branch_id, consultation_id, consultation_code, purpose, service_type, service_ref, property_id, landlord_id, items, subtotal, tax_amount, total_amount, date, due_date, payment_status, approval_status, payment_reference, payment_method, notes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         ).bind(
           id, invoiceNumber, body.clientId || null, body.clientName, body.clientEmail, body.clientPhone,
-          body.matterId || null, body.branchId || 'br-abuja-01', body.consultationCode || null,
+          body.matterId || null, body.branchId || 'br-abuja-01', body.consultationId || null, body.consultationCode || null,
+          body.purpose || 'GENERAL_BILLING', body.serviceType || 'GENERAL', body.serviceRef || null,
+          body.propertyId || null, body.landlordId || null,
           JSON.stringify(body.items || []), body.subtotal || body.totalAmount, body.taxAmount || 0,
           body.totalAmount, body.date || new Date().toISOString().split('T')[0], body.dueDate,
-          body.paymentStatus || 'UNPAID', body.approvalStatus || 'NONE', paymentReference, body.paymentMethod || null, body.notes || ''
+          initialStatus, body.approvalStatus || 'NONE', paymentReference, body.paymentMethod || null, body.notes || ''
         ).run();
 
         await logAudit(db, auth.user.id, auth.user.name, auth.user.role, 'CREATE_INVOICE', 'Invoice', id, `Generated invoice ${invoiceNumber} for ${body.clientName} (₦${Number(body.totalAmount).toLocaleString()})`);
@@ -1615,19 +1651,44 @@ export async function handleApiRequest(
         return errorResponse('Unauthorized: Only billing-authorized personnel can modify invoices.', 403);
       }
 
+      const existing = await db.prepare('SELECT * FROM invoices WHERE id = ?').bind(id).first<any>();
+      if (!existing) {
+        return errorResponse('Invoice not found.', 404);
+      }
+
+      const requestedStatus = typeof body.paymentStatus === 'string' ? body.paymentStatus : undefined;
+
+      // Ordinary invoice editing must never bypass the payment approval process.
+      if (requestedStatus === PAYMENT_STATUS_VERIFIED && existing.payment_status !== PAYMENT_STATUS_VERIFIED) {
+        return errorResponse('An invoice can only be marked PAID through the authorized payment verification process.', 403);
+      }
+      if (existing.payment_status === PAYMENT_STATUS_VERIFIED) {
+        if (requestedStatus && requestedStatus !== PAYMENT_STATUS_VERIFIED) {
+          return errorResponse('A verified invoice cannot be reopened by ordinary editing. An authorized adjustment is required.', 409);
+        }
+        if (body.totalAmount !== undefined && Number(body.totalAmount) !== Number(existing.total_amount)) {
+          return errorResponse('The total of a verified invoice cannot be changed without an authorized adjustment.', 409);
+        }
+      }
+
+      // Invoice number and payment reference are immutable here.
       await db.prepare(
         `UPDATE invoices 
          SET client_name = ?, client_email = ?, client_phone = ?, subtotal = ?, total_amount = ?, 
              payment_status = ?, approval_status = ?, notes = ?
          WHERE id = ?`
       ).bind(
-        body.clientName, body.clientEmail, body.clientPhone, body.subtotal, body.totalAmount,
-        body.paymentStatus, body.approvalStatus || 'NONE', body.notes || '', id
+        body.clientName ?? existing.client_name,
+        body.clientEmail ?? existing.client_email,
+        body.clientPhone ?? existing.client_phone,
+        body.subtotal ?? existing.subtotal,
+        body.totalAmount ?? existing.total_amount,
+        requestedStatus || existing.payment_status,
+        body.approvalStatus || existing.approval_status || 'NONE',
+        body.notes ?? existing.notes ?? '', id
       ).run();
 
-      if (auth) {
-        await logAudit(db, auth.user.id, auth.user.name, auth.user.role, 'UPDATE_INVOICE', 'Invoice', id, `Updated invoice for ${body.clientName}`);
-      }
+      await logAudit(db, auth.user.id, auth.user.name, auth.user.role, 'UPDATE_INVOICE', 'Invoice', id, `Updated invoice ${existing.invoice_number} for ${body.clientName || existing.client_name}`);
       return jsonResponse({ success: true });
     }
 
@@ -1645,82 +1706,270 @@ export async function handleApiRequest(
         return jsonResponse({ success: true, payments: rows.results || [] });
       }
 
-      // Submit payment — public endpoint (clients submit payment proof)
+      // Submit payment — public endpoint (clients submit payment proof).
+      // SECURITY: the submitted proof is recorded as AWAITING VERIFICATION only.
+      // It never marks an invoice paid, never activates a service, and never
+      // writes any verified/receipt field. Amount, branch and service links are
+      // taken from the stored invoice — never trusted from the browser.
       if (request.method === 'POST') {
-        const body = await request.json() as any;
-        const id = body.id || `pay-${Date.now()}`;
+        let body: any;
+        try {
+          body = await request.json();
+        } catch {
+          return errorResponse('Malformed payment submission payload.', 400);
+        }
+
+        const invoiceNumber = typeof body.invoiceNumber === 'string' ? body.invoiceNumber.trim() : '';
+        const paymentReference = typeof body.paymentReference === 'string' ? body.paymentReference.trim() : '';
+        if (!invoiceNumber && !paymentReference) {
+          return errorResponse('An invoice number or payment reference is required.', 400);
+        }
+
+        // Resolve the invoice authoritatively.
+        const invoice = await db.prepare(
+          'SELECT * FROM invoices WHERE invoice_number = ? OR payment_reference = ? LIMIT 1'
+        ).bind(invoiceNumber || paymentReference, invoiceNumber || paymentReference).first<any>();
+        if (!invoice) {
+          return errorResponse('No matching invoice was found for the supplied reference.', 404);
+        }
+
+        // A settled invoice cannot be paid again.
+        if (invoice.payment_status === PAYMENT_STATUS_VERIFIED) {
+          return errorResponse('This invoice has already been settled and verified.', 409);
+        }
+        if (invoice.payment_status === 'CANCELLED') {
+          return errorResponse('This invoice has been cancelled and cannot accept payment.', 409);
+        }
+
+        // Amount must match the stored invoice — the browser value is not trusted.
+        const amountDue = Number(invoice.total_amount);
+        if (body.amount !== undefined && body.amount !== null && Number(body.amount) !== amountDue) {
+          return errorResponse(`Payment amount does not match the invoice total of ₦${amountDue.toLocaleString()}.`, 400);
+        }
+
+        // Validate the proof document (URL or data-URL) if supplied.
+        const proofDocumentUrl = typeof body.proofDocumentUrl === 'string' ? body.proofDocumentUrl : null;
+        if (proofDocumentUrl && proofDocumentUrl.length > MAX_PROOF_LENGTH) {
+          return errorResponse('The uploaded payment proof is too large. Please upload a smaller file.', 413);
+        }
+
+        // Prevent a duplicate active submission for the same invoice (safe retries).
+        const existing = await db.prepare(
+          `SELECT id FROM payments WHERE invoice_number = ? AND status = ? ORDER BY submitted_at DESC LIMIT 1`
+        ).bind(invoice.invoice_number, PAYMENT_STATUS_SUBMITTED).first<any>();
+        if (existing) {
+          return jsonResponse({ success: true, paymentId: existing.id, status: PAYMENT_STATUS_SUBMITTED, duplicate: true });
+        }
+
+        // Unique reference per submission attempt (the invoice reference is
+        // reused for a legitimate resubmission after a rejection).
+        let attemptReference = invoice.payment_reference;
+        const taken = await db.prepare('SELECT id FROM payments WHERE payment_reference = ? LIMIT 1').bind(attemptReference).first<any>();
+        if (taken) {
+          const priorCount = await db.prepare('SELECT COUNT(*) as c FROM payments WHERE invoice_number = ?').bind(invoice.invoice_number).first<{ c: number }>();
+          attemptReference = `${invoice.payment_reference}-R${(priorCount?.c || 1) + 1}`;
+        }
+
+        const id = `pay-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
         const submittedAt = new Date().toISOString();
+        const serviceType: PaymentServiceType = (invoice.service_type as PaymentServiceType) || 'GENERAL';
+        const serviceRef: string | null = invoice.service_ref || null;
 
         await db.prepare(
           `INSERT INTO payments 
-           (id, payment_reference, invoice_number, client_name, amount, branch_id, payment_method, payment_date, status, bank_transaction_ref, proof_document_url, submitted_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PAYMENT_SUBMITTED', ?, ?, ?)`
+           (id, payment_reference, invoice_number, invoice_id, service_type, service_ref, client_name, amount, branch_id, payment_method, payment_date, status, bank_transaction_ref, proof_document_url, submitted_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         ).bind(
-          id, body.paymentReference, body.invoiceNumber, body.clientName, body.amount,
-          body.branchId || 'br-abuja-01', body.paymentMethod || 'Bank Transfer',
-          body.paymentDate || submittedAt.split('T')[0], body.bankTransactionRef || null,
-          body.proofDocumentUrl || null, submittedAt
+          id, attemptReference, invoice.invoice_number, invoice.id, serviceType, serviceRef,
+          invoice.client_name, amountDue, invoice.branch_id || 'br-abuja-01',
+          body.paymentMethod || 'Bank Transfer',
+          body.paymentDate || submittedAt.split('T')[0], PAYMENT_STATUS_SUBMITTED,
+          typeof body.bankTransactionRef === 'string' ? body.bankTransactionRef.trim() : null,
+          proofDocumentUrl, submittedAt
         ).run();
 
-        // Update invoice payment_status
+        // Mark the invoice as awaiting verification ONLY (never paid/verified).
         await db.prepare(
-          "UPDATE invoices SET payment_status = 'PAYMENT_SUBMITTED' WHERE invoice_number = ? OR payment_reference = ?"
-        ).bind(body.invoiceNumber, body.paymentReference).run();
+          `UPDATE invoices SET payment_status = ? WHERE id = ? AND payment_status NOT IN (?, 'CANCELLED')`
+        ).bind(PAYMENT_STATUS_SUBMITTED, invoice.id, PAYMENT_STATUS_VERIFIED).run();
 
-        // Update consultation status if matching
-        await db.prepare(
-          "UPDATE consultations SET status = 'Payment Verification Pending', client_visible_update = 'Payment submitted. Awaiting verification by Account Officer.' WHERE invoice_number = ? OR payment_reference = ?"
-        ).bind(body.invoiceNumber, body.paymentReference).run();
+        // Reflect the pending state on the explicitly linked service.
+        if (serviceType === 'CONSULTATION') {
+          const whereService = serviceRef ? 'id = ?' : 'invoice_number = ?';
+          const whereValue = serviceRef || invoice.invoice_number;
+          await db.prepare(
+            `UPDATE consultations SET status = 'Payment Verification Pending',
+                client_visible_update = 'Payment submitted. Awaiting verification by the Account Officer.'
+             WHERE ${whereService}`
+          ).bind(whereValue).run();
+        }
 
-        return jsonResponse({ success: true, paymentId: id });
+        await logAudit(
+          db, 'public', invoice.client_name, 'PUBLIC', 'SUBMIT_PAYMENT', 'Payment', id,
+          `Payment proof submitted for invoice ${invoice.invoice_number} (₦${amountDue.toLocaleString()}) — awaiting verification`
+        );
+
+        return jsonResponse({ success: true, paymentId: id, status: PAYMENT_STATUS_SUBMITTED });
       }
     }
 
-    // Role-authorized payment verification
+    // Authorized payment verification — the ONLY path that may settle an
+    // invoice, issue a durable receipt, or activate a paid service.
     if (path === '/api/payments/verify' && request.method === 'PUT') {
       const auth = await getAuthUser(request, db);
       if (!auth) return errorResponse('Unauthorized: Valid personnel login required.', 401);
 
-      // Role check: Only Account Officer, Administrator, or Principal Partner
-      if (auth.user.role !== 'ACCOUNT_OFFICER' && auth.user.role !== 'ADMINISTRATOR_SECRETARY' && auth.user.role !== 'PRINCIPAL_PARTNER') {
-        return errorResponse('Forbidden: Only Account Officer or Chambers Administration can verify payments.', 403);
+      // Single shared permission policy (see src/server/auth.ts).
+      if (!canVerifyPayments(auth.user)) {
+        return errorResponse(
+          `Forbidden: Only an authorized payment verifier may verify payments. Permitted roles: ${PAYMENT_VERIFIER_ROLES.join(', ')}.`,
+          403
+        );
       }
 
-      const body = await request.json() as any;
-      const { paymentId, isApproved, notes } = body;
+      let body: any;
+      try {
+        body = await request.json();
+      } catch {
+        return errorResponse('Malformed verification payload.', 400);
+      }
 
-      const receiptNumber = isApproved ? await getNextNumber(db, 'receipt', 'REC') : null;
-      const newStatus = isApproved ? 'PAYMENT_VERIFIED' : 'REJECTED';
+      const paymentId = typeof body.paymentId === 'string' ? body.paymentId.trim() : '';
+      if (!paymentId) return errorResponse('Payment ID is required.', 400);
+
+      const isApproved = body.isApproved === true;
+      const notes = typeof body.notes === 'string' ? body.notes.trim().slice(0, 2000) : '';
+      if (!isApproved && !notes) {
+        return errorResponse('A rejection reason is required.', 400);
+      }
+
+      // The payment must exist. Actor identity is taken from the session only.
+      const payment = await db.prepare('SELECT * FROM payments WHERE id = ?').bind(paymentId).first<any>();
+      if (!payment) return errorResponse('Payment submission not found.', 404);
+
+      // Branch-level restriction on payment records.
+      if (auth.user.role !== 'PRINCIPAL_PARTNER' && payment.branch_id && payment.branch_id !== auth.user.branchId) {
+        return errorResponse('Forbidden: This payment belongs to another branch.', 403);
+      }
+
+      // Already verified → idempotent: never issue a second receipt.
+      if (payment.status === PAYMENT_STATUS_VERIFIED) {
+        return jsonResponse({
+          success: true,
+          alreadyVerified: true,
+          receiptNumber: payment.receipt_number || null,
+          status: PAYMENT_STATUS_VERIFIED
+        });
+      }
+
+      // Only a submission awaiting verification may be decided, unless a defined
+      // administrative correction (Principal Partner only) explicitly permits it.
+      const correctionAllowed = canApplyPaymentCorrection(auth.user) && body.administrativeCorrection === true;
+      if (payment.status !== PAYMENT_STATUS_SUBMITTED && !correctionAllowed) {
+        return errorResponse('This payment is not awaiting verification and cannot be changed without an authorized administrative correction.', 409);
+      }
+
+      const invoice = payment.invoice_id
+        ? await db.prepare('SELECT * FROM invoices WHERE id = ?').bind(payment.invoice_id).first<any>()
+        : await db.prepare('SELECT * FROM invoices WHERE invoice_number = ?').bind(payment.invoice_number).first<any>();
+
+      if (isApproved) {
+        const receiptNumber = await getNextNumber(db, 'receipt', 'REC');
+
+        // Guard the state transition atomically: only a payment that is not yet
+        // verified can be moved to verified.
+        const upd = await db.prepare(
+          `UPDATE payments 
+           SET status = ?, receipt_number = ?, verified_by_id = ?, verified_by_name = ?, 
+               verification_date = datetime('now'), verification_notes = ?
+           WHERE id = ? AND status <> ?`
+        ).bind(PAYMENT_STATUS_VERIFIED, receiptNumber, auth.user.id, auth.user.name, notes, paymentId, PAYMENT_STATUS_VERIFIED).run();
+
+        if (!upd?.meta?.changes) {
+          const fresh = await db.prepare('SELECT receipt_number FROM payments WHERE id = ?').bind(paymentId).first<any>();
+          return jsonResponse({ success: true, alreadyVerified: true, receiptNumber: fresh?.receipt_number || null, status: PAYMENT_STATUS_VERIFIED });
+        }
+
+        // Persist the durable receipt exactly once per payment submission.
+        const existingReceipt = await db.prepare('SELECT receipt_number FROM receipts WHERE payment_reference = ?').bind(payment.payment_reference).first<any>();
+        const finalReceiptNumber = existingReceipt?.receipt_number || receiptNumber;
+        if (finalReceiptNumber !== receiptNumber) {
+          await db.prepare('UPDATE payments SET receipt_number = ? WHERE id = ?').bind(finalReceiptNumber, paymentId).run();
+        }
+        if (!existingReceipt) {
+          await db.prepare(
+            `INSERT OR IGNORE INTO receipts
+             (id, receipt_number, payment_reference, invoice_number, client_name, amount, payment_method, issued_date, issued_by_id, issued_by_name)
+             VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?)`
+          ).bind(
+            `rec-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+            finalReceiptNumber, payment.payment_reference, payment.invoice_number,
+            payment.client_name, Number(payment.amount), payment.payment_method || 'Bank Transfer',
+            auth.user.id, auth.user.name
+          ).run();
+        }
+
+        // Settle the invoice (guard: never overwrite a CANCELLED invoice).
+        await db.prepare(
+          `UPDATE invoices SET payment_status = ? WHERE invoice_number = ? AND payment_status <> 'CANCELLED'`
+        ).bind(PAYMENT_STATUS_VERIFIED, payment.invoice_number).run();
+
+        // Activate ONLY the explicitly linked service.
+        const serviceType = payment.service_type || invoice?.service_type;
+        const serviceRef = payment.service_ref || invoice?.service_ref;
+        if (serviceType === 'CONSULTATION') {
+          const where = serviceRef ? 'id = ?' : 'invoice_number = ?';
+          await db.prepare(
+            `UPDATE consultations SET status = 'Payment Verified',
+                client_visible_update = ?
+             WHERE ${where}`
+          ).bind(`Payment verified by Accounts. Receipt ${finalReceiptNumber} issued. Your consultation schedule is confirmed.`, serviceRef || payment.invoice_number).run();
+        } else if (serviceType === 'PROPERTY' && serviceRef) {
+          await db.prepare(
+            `UPDATE properties SET registration_payment_status = ?, legal_status = 'Managed by Chambers' WHERE id = ?`
+          ).bind(PROPERTY_PAYMENT_CONFIRMED, serviceRef).run();
+        }
+
+        await logAudit(
+          db, auth.user.id, auth.user.name, auth.user.role, 'VERIFY_PAYMENT', 'Payment', paymentId,
+          `Verified payment of ₦${Number(payment.amount).toLocaleString()} for ${payment.client_name} (invoice ${payment.invoice_number}); receipt ${finalReceiptNumber} issued`
+        );
+
+        return jsonResponse({ success: true, receiptNumber: finalReceiptNumber, status: PAYMENT_STATUS_VERIFIED });
+      }
+
+      // Rejection path — record history, create NO receipt, activate NOTHING.
+      const upd = await db.prepare(
+        `UPDATE payments 
+         SET status = ?, receipt_number = NULL, verified_by_id = ?, verified_by_name = ?, 
+             verification_date = datetime('now'), verification_notes = ?
+         WHERE id = ? AND status <> ?`
+      ).bind(PAYMENT_STATUS_REJECTED, auth.user.id, auth.user.name, notes, paymentId, PAYMENT_STATUS_VERIFIED).run();
+      if (!upd?.meta?.changes) {
+        return errorResponse('This payment was already settled and cannot be rejected.', 409);
+      }
 
       await db.prepare(
-        `UPDATE payments 
-         SET status = ?, receipt_number = ?, verified_by_id = ?, verified_by_name = ?, 
-             verification_date = datetime('now'), verification_notes = ?
-         WHERE id = ?`
-      ).bind(newStatus, receiptNumber, auth.user.id, auth.user.name, notes || '', paymentId).run();
+        `UPDATE invoices SET payment_status = ? WHERE invoice_number = ? AND payment_status <> ?`
+      ).bind(INVOICE_STATUS_UNPAID, payment.invoice_number, PAYMENT_STATUS_VERIFIED).run();
 
-      const payment = await db.prepare('SELECT * FROM payments WHERE id = ?').bind(paymentId).first<any>();
-      if (payment) {
-        // Update invoice
+      const serviceType = payment.service_type || invoice?.service_type;
+      const serviceRef = payment.service_ref || invoice?.service_ref;
+      if (serviceType === 'CONSULTATION') {
+        const where = serviceRef ? 'id = ?' : 'invoice_number = ?';
         await db.prepare(
-          `UPDATE invoices SET payment_status = ? WHERE invoice_number = ?`
-        ).bind(isApproved ? 'PAYMENT_VERIFIED' : 'UNPAID', payment.invoice_number).run();
-
-        // Update consultation
-        await db.prepare(
-          `UPDATE consultations 
-           SET status = ?, client_visible_update = ?
-           WHERE invoice_number = ? OR payment_reference = ?`
-        ).bind(
-          isApproved ? 'Payment Verified' : 'Awaiting Payment',
-          isApproved ? `Payment verified by Accounts. Receipt ${receiptNumber} issued. Schedule confirmed.` : `Payment could not be verified: ${notes}`,
-          payment.invoice_number, payment.payment_reference
-        ).run();
-
-        await logAudit(db, auth.user.id, auth.user.name, auth.user.role, 'VERIFY_PAYMENT', 'Payment', paymentId, `${isApproved ? 'Verified' : 'Rejected'} payment of ₦${Number(payment.amount).toLocaleString()} for ${payment.client_name}`);
+          `UPDATE consultations SET status = 'Awaiting Payment', client_visible_update = ?
+           WHERE ${where}`
+        ).bind(`Payment could not be verified: ${notes}. Please correct the details and resubmit.`, serviceRef || payment.invoice_number).run();
       }
+      // A property registration fee that is rejected simply stays PENDING_PAYMENT.
 
-      return jsonResponse({ success: true, receiptNumber, status: newStatus });
+      await logAudit(
+        db, auth.user.id, auth.user.name, auth.user.role, 'REJECT_PAYMENT', 'Payment', paymentId,
+        `Rejected payment of ₦${Number(payment.amount).toLocaleString()} for ${payment.client_name} (invoice ${payment.invoice_number}): ${notes}`
+      );
+
+      return jsonResponse({ success: true, receiptNumber: null, status: PAYMENT_STATUS_REJECTED });
     }
 
     // --------------------------------------------------------------------------
@@ -2038,7 +2287,12 @@ export async function handleApiRequest(
           body.totalUnits || 1, body.titleInformation || '', body.surveyInformation || '',
           body.legalStatus || 'Managed by Chambers', body.assignedLawyerId || 'usr-counsel-01',
           body.relatedClientId || null, body.notes || '', body.imageUrl || null,
-          body.registrationPaymentStatus || 'PAID_CONFIRMED', body.registrationFee !== undefined ? Number(body.registrationFee) : 50000
+          // A missing payment status must never imply payment. Manual
+          // confirmation is only honoured for an authorized verifier/billing role.
+          (body.registrationPaymentStatus === PROPERTY_PAYMENT_CONFIRMED && (canVerifyPayments(auth.user) || canManageBilling(auth.user)))
+            ? PROPERTY_PAYMENT_CONFIRMED
+            : (body.registrationPaymentStatus === PROPERTY_PAYMENT_CONFIRMED ? PROPERTY_PAYMENT_PENDING : (body.registrationPaymentStatus || PROPERTY_PAYMENT_PENDING)),
+          body.registrationFee !== undefined ? Number(body.registrationFee) : 50000
         ).run();
 
         await logAudit(db, auth.user.id, auth.user.name, auth.user.role, 'ADD_PROPERTY', 'Property', id, `Registered property: ${body.name} (${propertyId})`);
@@ -2071,7 +2325,10 @@ export async function handleApiRequest(
         ).bind(
           body.name ?? null, body.propertyType ?? null, body.address ?? null,
           body.state ?? null, body.lga ?? null, body.district ?? null,
-          body.legalStatus ?? null, body.registrationPaymentStatus ?? null,
+          body.legalStatus ?? null,
+          // Only an authorized verifier/billing role may change the registration
+          // payment status; other attempts are ignored (COALESCE keeps existing).
+          (canVerifyPayments(auth.user) || canManageBilling(auth.user)) ? (body.registrationPaymentStatus ?? null) : null,
           body.imageUrl ?? null, body.notes ?? null, body.totalUnits ?? null,
           id, id
         ).run();
@@ -2113,6 +2370,158 @@ export async function handleApiRequest(
 
         return jsonResponse({ success: true, landlordId, trackingCode, id });
       }
+    }
+
+    // --------------------------------------------------------------------------
+    // 8.1 PUBLIC LANDLORD / PROPERTY REGISTRATION
+    // --------------------------------------------------------------------------
+    // The public portal must be able to register a landlord + property and
+    // generate the registration invoice WITHOUT a staff session. These endpoints
+    // create records in a state that can never be mistaken for paid/active and
+    // return the authoritative ids/numbers the client then pays against.
+    if ((path === '/api/public/landlord-registration' || path === '/api/public/property-registration') && request.method === 'POST') {
+      let body: any;
+      try {
+        body = await request.json();
+      } catch {
+        return errorResponse('Malformed registration payload.', 400);
+      }
+
+      const propertyName = String(body.propertyName || '').trim();
+      const propertyAddress = String(body.propertyAddress || '').trim();
+      if (!propertyName || !propertyAddress) {
+        return errorResponse('Property name and address are required.', 400);
+      }
+
+      const branchId = body.branchId || 'br-abuja-01';
+      const regFee = body.registrationFee !== undefined ? Number(body.registrationFee) : 50000;
+      if (!Number.isFinite(regFee) || regFee < 0) {
+        return errorResponse('Invalid registration fee.', 400);
+      }
+
+      const normEmail = (v: any) => String(v || '').trim().toLowerCase();
+      const normPhone = (v: any) => String(v || '').replace(/[^0-9]/g, '');
+      const normText = (v: any) => String(v || '').trim().toLowerCase().replace(/\s+/g, ' ');
+
+      let landlord: any;
+      let purpose: InvoicePurpose;
+
+      if (path === '/api/public/landlord-registration') {
+        // ---- New landlord -------------------------------------------------
+        const fullName = String(body.fullName || '').trim();
+        const phone = String(body.phone || '').trim();
+        const email = normEmail(body.email);
+        if (!fullName || !phone || !email) {
+          return errorResponse('Landlord name, phone and email are required.', 400);
+        }
+
+        // Duplicate-landlord guard on normalized identifiers.
+        const dupeLandlord = await db.prepare(
+          `SELECT id, landlord_id, tracking_code FROM landlords
+            WHERE LOWER(TRIM(email)) = ? OR REPLACE(REPLACE(REPLACE(phone,' ',''),'-',''),'+','') LIKE ? LIMIT 1`
+        ).bind(email, `%${normPhone(phone)}`).first<any>();
+        if (dupeLandlord) {
+          return errorResponse('A landlord matching this phone or email already exists. Please use the "existing landlord" option to add a property.', 409);
+        }
+
+        const trackingCode = await getNextNumber(db, 'landlord', 'LAND');
+        const countRow = await db.prepare('SELECT COUNT(*) as c FROM landlords').first<{ c: number }>();
+        const landlordId = `LND-${String((countRow?.c || 0) + 1).padStart(4, '0')}`;
+        const id = `lnd-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+
+        await db.prepare(
+          `INSERT INTO landlords (id, landlord_id, full_name, phone, email, address, bank_details, tracking_code, branch_id, date_registered)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
+        ).bind(
+          id, landlordId, fullName, phone, email, String(body.address || '').trim(),
+          String(body.bankDetails || ''), trackingCode, branchId
+        ).run();
+
+        landlord = { id, landlordId, fullName, phone, email, trackingCode, branchId };
+        purpose = 'NEW_LANDLORD_PROPERTY_REGISTRATION';
+      } else {
+        // ---- Existing landlord adding a property --------------------------
+        const code = normText(body.landlordTrackingCode);
+        const verify = normText(body.phoneOrEmail);
+        if (!code || !verify) {
+          return errorResponse('Your landlord/property code and registered phone or email are required.', 400);
+        }
+
+        const candidate = await db.prepare(
+          `SELECT * FROM landlords WHERE LOWER(TRIM(tracking_code)) = ? OR LOWER(TRIM(landlord_id)) = ? LIMIT 1`
+        ).bind(code, code).first<any>();
+        if (!candidate || (normEmail(candidate.email) !== verify && !normPhone(candidate.phone).includes(normPhone(verify)))) {
+          return errorResponse('Landlord record not found. Please verify your code and registered phone or email.', 404);
+        }
+
+        landlord = {
+          id: candidate.id, landlordId: candidate.landlord_id, fullName: candidate.full_name,
+          phone: candidate.phone, email: candidate.email, trackingCode: candidate.tracking_code,
+          branchId: candidate.branch_id || branchId
+        };
+        purpose = 'ADDITIONAL_PROPERTY_REGISTRATION';
+      }
+
+      // Duplicate-property guard for this landlord.
+      const dupeProperty = await db.prepare(
+        `SELECT property_id FROM properties
+          WHERE landlord_id = ? AND (LOWER(TRIM(name)) = ? OR LOWER(TRIM(address)) = ?) LIMIT 1`
+      ).bind(landlord.id, normText(propertyName), normText(propertyAddress)).first<any>();
+      if (dupeProperty) {
+        return errorResponse(`A property matching this name or address is already registered under this landlord (${dupeProperty.property_id}).`, 409);
+      }
+
+      // ---- Create the property (PENDING — cannot be mistaken for active) ---
+      const propertyId = await getNextNumber(db, 'property', 'PROP');
+      const propertyRowId = `prop-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+      await db.prepare(
+        `INSERT INTO properties 
+         (id, property_id, branch_id, name, property_type, address, state, lga, district, landlord_id, total_units,
+          title_information, survey_information, legal_status, assigned_lawyer_id, notes, image_url,
+          registration_payment_status, registration_fee)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Managed by Chambers', ?, ?, ?, ?, ?)`
+      ).bind(
+        propertyRowId, propertyId, landlord.branchId || branchId, propertyName,
+        body.propertyType || 'Commercial Building', propertyAddress,
+        String(body.state || 'FCT').trim(), String(body.lga || 'AMAC').trim(), String(body.district || 'CBD').trim(),
+        landlord.id, Number(body.totalUnits) || 1, String(body.titleInformation || ''), String(body.surveyInformation || ''),
+        'usr-counsel-01', String(body.notes || ''), body.imageUrl || null,
+        PROPERTY_PAYMENT_PENDING, regFee
+      ).run();
+
+      // ---- Create the registration invoice with an explicit purpose --------
+      const invoiceNumber = await getNextNumber(db, 'invoice', 'INV');
+      const paymentRef = await getNextNumber(db, 'payment', 'PAY');
+      const invoiceId = `inv-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+      const dueDate = new Date(Date.now() + 86400000 * 7).toISOString().split('T')[0];
+      await db.prepare(
+        `INSERT INTO invoices 
+         (id, invoice_number, client_name, client_email, client_phone, branch_id, purpose, service_type, service_ref, property_id, landlord_id, items, subtotal, tax_amount, total_amount, date, due_date, payment_status, payment_reference, notes)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'PROPERTY', ?, ?, ?, ?, ?, 0, ?, ?, ?, 'UNPAID', ?, ?)`
+      ).bind(
+        invoiceId, invoiceNumber, `${landlord.fullName} (Landlord)`, landlord.email, landlord.phone,
+        landlord.branchId || branchId, purpose, propertyRowId, propertyRowId, landlord.id,
+        JSON.stringify([{ description: `Property Registration & Title Verification Fee — ${propertyName} (${propertyId})`, amount: regFee }]),
+        regFee, regFee, new Date().toISOString().split('T')[0], dueDate, paymentRef,
+        `Landlord Code: ${landlord.trackingCode} · Property ID: ${propertyId}. The property becomes active and available only after the registration fee is verified.`
+      ).run();
+
+      await logAudit(
+        db, 'public', landlord.fullName, 'PUBLIC', 'PUBLIC_PROPERTY_REGISTRATION', 'Property', propertyRowId,
+        `Public registration (${purpose}): ${propertyName} (${propertyId}) for landlord ${landlord.trackingCode}; invoice ${invoiceNumber}`
+      );
+
+      return jsonResponse({
+        success: true,
+        landlord: { id: landlord.id, landlordId: landlord.landlordId, fullName: landlord.fullName, phone: landlord.phone, email: landlord.email, trackingCode: landlord.trackingCode, branchId: landlord.branchId || branchId },
+        property: { id: propertyRowId, propertyId, name: propertyName, branchId: landlord.branchId || branchId, landlordId: landlord.id, registrationPaymentStatus: PROPERTY_PAYMENT_PENDING, registrationFee: regFee },
+        invoice: { id: invoiceId, invoiceNumber, totalAmount: regFee, paymentStatus: INVOICE_STATUS_UNPAID, purpose },
+        invoiceNumber,
+        invoiceId,
+        paymentRef,
+        trackingCode: landlord.trackingCode,
+        propertyId
+      }, 201);
     }
 
     if (path === '/api/tenants') {
@@ -2455,13 +2864,14 @@ export async function handleApiRequest(
           'Consultation request received. Invoice generated. Awaiting payment submission.'
         ).run();
 
-        // Insert associated invoice
+        // Insert associated invoice — explicitly linked to this consultation and
+        // to the branch, so branch scoping and verification can resolve it.
         await db.prepare(
           `INSERT INTO invoices 
-           (id, invoice_number, client_name, client_email, client_phone, consultation_code, items, subtotal, tax_amount, total_amount, date, due_date, payment_status, payment_reference, notes)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 'UNPAID', ?, ?)`
+           (id, invoice_number, client_name, client_email, client_phone, branch_id, consultation_id, consultation_code, purpose, service_type, service_ref, items, subtotal, tax_amount, total_amount, date, due_date, payment_status, payment_reference, notes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'CONSULTATION_FEE', 'CONSULTATION', ?, ?, ?, 0, ?, ?, ?, 'UNPAID', ?, ?)`
         ).bind(
-          invId, invoiceNumber, body.fullName, body.email, body.phone, code,
+          invId, invoiceNumber, body.fullName, body.email, body.phone, body.branchId || 'br-abuja-01', id, code, id,
           JSON.stringify([{ description: `Legal Consultation Fee (${body.serviceCategory}) — ${body.method}`, amount: fee }]),
           fee, fee, new Date().toISOString().split('T')[0], body.preferredDate, paymentRef,
           `Consultation Reference: ${code}. Quote payment reference ${paymentRef} upon transfer.`
@@ -2471,6 +2881,7 @@ export async function handleApiRequest(
           success: true,
           consultation: { id, code, fullName: body.fullName, status: 'Awaiting Payment' },
           invoiceNumber,
+          invoiceId: invId,
           paymentReference: paymentRef
         });
       }

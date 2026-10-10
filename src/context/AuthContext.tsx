@@ -204,7 +204,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const canManageUsers = isPrincipalPartner || isHeadOfChamber || isAdminSecretary;
   const canManageWebsite = isPrincipalPartner || isHeadOfChamber || isAdminSecretary;
   const canAssignCases = isPrincipalPartner || isHeadOfChamber;
-  const canVerifyPayments = isAccountOfficer || isAdminSecretary;
+  // Mirrors the shared server policy (src/server/auth.ts PAYMENT_VERIFIER_ROLES).
+  const canVerifyPayments = isAccountOfficer || isAdminSecretary || isPrincipalPartner;
 
   const isAuthenticated = !!currentUser && !!session;
   const requiresPasswordChange = currentUser?.requiresPasswordChange ?? false;

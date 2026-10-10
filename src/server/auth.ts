@@ -25,8 +25,24 @@ const WEBSITE_MANAGER_ROLES: UserRole[] = ['PRINCIPAL_PARTNER', 'HEAD_OF_CHAMBER
 // Roles that can assign cases
 const CASE_ASSIGNER_ROLES: UserRole[] = ['PRINCIPAL_PARTNER', 'HEAD_OF_CHAMBER'];
 
-// Roles that can verify payments
-const PAYMENT_VERIFIER_ROLES: UserRole[] = ['ACCOUNT_OFFICER', 'ADMINISTRATOR_SECRETARY'];
+// Roles that can verify payments — SINGLE SHARED POLICY.
+//
+// The payment-verification route previously allowed
+// ACCOUNT_OFFICER + ADMINISTRATOR_SECRETARY + PRINCIPAL_PARTNER while this
+// module declared only the first two. This constant is now the one policy used
+// by every server endpoint and by the client UI (via canVerifyPayments):
+//   - ACCOUNT_OFFICER         — performs the day-to-day verification/rejection.
+//   - ADMINISTRATOR_SECRETARY — chambers administration, per approved policy.
+//   - PRINCIPAL_PARTNER       — may verify directly and is the only role
+//                               permitted to apply an administrative correction
+//                               to an already-decided payment.
+// HEAD_OF_CHAMBER is a billing manager (creates invoices) but is NOT a payment
+// verifier under the firm's policy, so it is intentionally excluded here.
+export const PAYMENT_VERIFIER_ROLES: UserRole[] = ['ACCOUNT_OFFICER', 'ADMINISTRATOR_SECRETARY', 'PRINCIPAL_PARTNER'];
+
+// Roles allowed to apply an administrative correction to an already-decided
+// payment (e.g. overturn a rejection). Deliberately narrower than verification.
+export const PAYMENT_CORRECTION_ROLES: UserRole[] = ['PRINCIPAL_PARTNER'];
 
 // Roles that can manage billing/invoices
 const BILLING_ROLES: UserRole[] = ['PRINCIPAL_PARTNER', 'HEAD_OF_CHAMBER', 'ACCOUNT_OFFICER'];
@@ -63,6 +79,10 @@ export function canAssignCases(user: User | null): boolean {
 
 export function canVerifyPayments(user: User | null): boolean {
   return hasRole(user, PAYMENT_VERIFIER_ROLES);
+}
+
+export function canApplyPaymentCorrection(user: User | null): boolean {
+  return hasRole(user, PAYMENT_CORRECTION_ROLES);
 }
 
 export function canManageBilling(user: User | null): boolean {

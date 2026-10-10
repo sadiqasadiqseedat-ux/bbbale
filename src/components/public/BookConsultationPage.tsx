@@ -74,6 +74,8 @@ export const BookConsultationPage: React.FC<BookConsultationPageProps> = ({ onNa
   const [showPaymentForm, setShowPaymentForm] = useState(false);
   const [paymentTxnRef, setPaymentTxnRef] = useState('');
   const [paymentSubmittedSuccess, setPaymentSubmittedSuccess] = useState(false);
+  const [paymentSubmitting, setPaymentSubmitting] = useState(false);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
   const [fileUploadError, setFileUploadError] = useState<string | null>(null);
 
   const ALLOWED_EXTENSIONS = ['.pdf', '.jpg', '.jpeg', '.png', '.doc', '.docx'];
@@ -135,18 +137,26 @@ export const BookConsultationPage: React.FC<BookConsultationPageProps> = ({ onNa
     e.preventDefault();
     if (!completedData) return;
 
-    await storageService.submitPayment({
-      paymentReference: completedData.paymentRef,
-      invoiceNumber: completedData.invoice.invoiceNumber,
-      clientName: completedData.consultation.fullName,
-      amount: completedData.invoice.totalAmount,
-      paymentMethod: 'Bank Transfer',
-      bankTransactionRef: paymentTxnRef || `NIP-FT-${Date.now()}`,
-      notes: 'Submitted via public consultation booking portal'
-    });
-
-    setPaymentSubmittedSuccess(true);
-    setShowPaymentForm(false);
+    setPaymentError(null);
+    setPaymentSubmitting(true);
+    try {
+      // Await the authoritative server decision before showing success.
+      await storageService.submitPayment({
+        paymentReference: completedData.paymentRef,
+        invoiceNumber: completedData.invoice.invoiceNumber,
+        clientName: completedData.consultation.fullName,
+        amount: completedData.invoice.totalAmount,
+        paymentMethod: 'Bank Transfer',
+        bankTransactionRef: paymentTxnRef || `NIP-FT-${Date.now()}`,
+        notes: 'Submitted via public consultation booking portal'
+      });
+      setPaymentSubmittedSuccess(true);
+      setShowPaymentForm(false);
+    } catch (err: any) {
+      setPaymentError(err?.message || 'Failed to submit payment proof. Please try again.');
+    } finally {
+      setPaymentSubmitting(false);
+    }
   };
 
   // If successfully booked, render invoice & confirmation screen
@@ -291,6 +301,12 @@ export const BookConsultationPage: React.FC<BookConsultationPageProps> = ({ onNa
 
             {showPaymentForm && !paymentSubmittedSuccess && (
               <form onSubmit={handlePaymentSubmit} className="pt-4 border-t border-slate-800 space-y-3">
+                {paymentError && (
+                  <div className="p-3 bg-rose-950/60 border border-rose-500/50 text-rose-200 rounded-lg text-xs flex items-center space-x-2">
+                    <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                    <span>{paymentError}</span>
+                  </div>
+                )}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs text-slate-300 font-medium mb-1">
@@ -308,9 +324,10 @@ export const BookConsultationPage: React.FC<BookConsultationPageProps> = ({ onNa
                   <div className="flex items-end">
                     <button
                       type="submit"
-                      className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded transition-colors"
+                      disabled={paymentSubmitting}
+                      className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded transition-colors disabled:opacity-60"
                     >
-                      Confirm Payment Submission
+                      {paymentSubmitting ? 'Submitting...' : 'Confirm Payment Submission'}
                     </button>
                   </div>
                 </div>

@@ -73,7 +73,7 @@ export const TrackingCentrePage: React.FC = () => {
     reader.readAsDataURL(file);
   };
 
-  const handleSubmitPayment = (e: React.FormEvent) => {
+  const handleSubmitPayment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!trackedRecord || trackedRecord.type !== 'payment') return;
     if (!paymentForm.bankTransactionRef.trim()) {
@@ -82,24 +82,30 @@ export const TrackingCentrePage: React.FC = () => {
     }
     setPaymentError(null);
     setPaymentSubmitting(true);
-    storageService.submitPayment({
-      paymentReference: trackedRecord.data.paymentReference,
-      invoiceNumber: trackedRecord.data.invoiceNumber,
-      clientName: trackedRecord.data.clientName,
-      amount: trackedRecord.data.totalAmount,
-      paymentMethod: paymentForm.paymentMethod,
-      bankTransactionRef: paymentForm.bankTransactionRef.trim(),
-      notes: paymentForm.notes.trim() || undefined,
-      proofDocumentUrl: receiptDataUrl || undefined
-    });
-    setPaymentSubmitting(false);
-    setPaymentSubmitSuccess(true);
-    setShowPaymentForm(false);
-    // Re-search to refresh the tracked record with updated status
-    setTimeout(() => {
-      setPaymentSubmitSuccess(false);
-      handleSearch({ preventDefault: () => {} } as React.FormEvent);
-    }, 2000);
+    try {
+      // Await the authoritative server decision before showing success.
+      await storageService.submitPayment({
+        paymentReference: trackedRecord.data.paymentReference,
+        invoiceNumber: trackedRecord.data.invoiceNumber,
+        clientName: trackedRecord.data.clientName,
+        amount: trackedRecord.data.totalAmount,
+        paymentMethod: paymentForm.paymentMethod,
+        bankTransactionRef: paymentForm.bankTransactionRef.trim(),
+        notes: paymentForm.notes.trim() || undefined,
+        proofDocumentUrl: receiptDataUrl || undefined
+      });
+      setPaymentSubmitSuccess(true);
+      setShowPaymentForm(false);
+      // Re-search to refresh the tracked record with updated status
+      setTimeout(() => {
+        setPaymentSubmitSuccess(false);
+        handleSearch({ preventDefault: () => {} } as React.FormEvent);
+      }, 2000);
+    } catch (err: any) {
+      setPaymentError(err?.message || 'Failed to submit payment proof. Please try again.');
+    } finally {
+      setPaymentSubmitting(false);
+    }
   };
 
   const handleSearch = (e: React.FormEvent) => {
