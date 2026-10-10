@@ -68,275 +68,316 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
     switch (status) {
       case 'IN_COURT':
         return (
-          <span className="inline-flex items-center space-x-1.5 text-[11px] font-bold text-amber-800 bg-amber-50 border border-amber-300 px-2.5 py-0.5 rounded-full shadow-2xs">
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse shrink-0"></span>
-            <span>IN COURT</span>
+          <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-accent-700 bg-accent-50 border border-accent-200 px-2.5 py-1 rounded-full">
+            <span className="w-1.5 h-1.5 rounded-full bg-accent-500 animate-pulse shrink-0"></span>
+            <span>In Court</span>
           </span>
         );
       case 'IN_OFFICE':
         return (
-          <span className="inline-flex items-center space-x-1.5 text-[11px] font-bold text-blue-800 bg-blue-50 border border-blue-300 px-2.5 py-0.5 rounded-full shadow-2xs">
-            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse shrink-0"></span>
-            <span>IN OFFICE</span>
+          <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-cyan-800 bg-cyan-50 border border-cyan-200 px-2.5 py-1 rounded-full">
+            <span className="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse shrink-0"></span>
+            <span>In Office</span>
           </span>
         );
       case 'AVAILABLE':
         return (
-          <span className="inline-flex items-center space-x-1.5 text-[11px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-300 px-2.5 py-0.5 rounded-full shadow-2xs">
+          <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-full">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0"></span>
-            <span>AVAILABLE FOR APPOINTMENT</span>
+            <span>Available</span>
           </span>
         );
       case 'BUSY':
         return (
-          <span className="inline-flex items-center space-x-1.5 text-[11px] font-bold text-rose-800 bg-rose-50 border border-rose-300 px-2.5 py-0.5 rounded-full shadow-2xs">
+          <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-rose-800 bg-rose-50 border border-rose-200 px-2.5 py-1 rounded-full">
             <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse shrink-0"></span>
-            <span>BUSY / IN CONFERENCE</span>
+            <span>Busy / In Conference</span>
           </span>
         );
       case 'ON_LEAVE':
         return (
-          <span className="inline-flex items-center space-x-1.5 text-[11px] font-bold text-purple-800 bg-purple-50 border border-purple-300 px-2.5 py-0.5 rounded-full shadow-2xs">
-            <span className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse shrink-0"></span>
-            <span>ON LEAVE</span>
+          <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-violet-800 bg-violet-50 border border-violet-200 px-2.5 py-1 rounded-full">
+            <span className="w-1.5 h-1.5 rounded-full bg-violet-500 animate-pulse shrink-0"></span>
+            <span>On Leave</span>
           </span>
         );
       case 'OUT_OF_OFFICE':
       default:
         return (
-          <span className="inline-flex items-center space-x-1.5 text-[11px] font-medium text-slate-700 bg-slate-100 border border-slate-300 px-2.5 py-0.5 rounded-full shadow-2xs">
-            <span className="w-1.5 h-1.5 rounded-full bg-slate-400 shrink-0"></span>
-            <span>OUT OF OFFICE</span>
+          <span className="inline-flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wide text-ink-600 bg-ink-100 border border-ink-200 px-2.5 py-1 rounded-full">
+            <span className="w-1.5 h-1.5 rounded-full bg-ink-400 shrink-0"></span>
+            <span>Out of Office</span>
           </span>
         );
     }
   };
 
+  const quickActions = [
+    {
+      id: 'consultation',
+      title: 'Book Legal Consultation',
+      tag: 'Branch Selection',
+      desc: 'Schedule in-person or virtual conferences. Direct branch selection ensures only your chosen branch handles your files.',
+      cta: 'Book Appointment',
+      icon: FileText,
+      from: 'from-accent-500',
+      to: 'to-accent-700',
+      hint: 'text-accent-700',
+      ring: 'group-hover:border-accent-400'
+    },
+    {
+      id: 'tracking',
+      title: 'Public Tracking Centre',
+      tag: 'Real-time Dossier',
+      desc: 'Securely track litigation dockets, consultation clearances, tenancy notices, and real-time payment confirmation status.',
+      cta: 'Track Record',
+      icon: Search,
+      from: 'from-cyan-500',
+      to: 'to-cyan-700',
+      hint: 'text-cyan-700',
+      ring: 'group-hover:border-cyan-400'
+    },
+    {
+      id: 'property-register',
+      title: 'Landlord & Property Portal',
+      tag: 'Landlord Registry',
+      desc: 'Register property, add multiple units under the same Landlord Code, select a branch, upload photos and verify fee payments.',
+      cta: 'Register Property',
+      icon: Building2,
+      from: 'from-emerald-500',
+      to: 'to-emerald-700',
+      hint: 'text-emerald-700',
+      ring: 'group-hover:border-emerald-400'
+    },
+    {
+      id: 'internship',
+      title: 'Student Internships',
+      tag: 'NLS Placement',
+      desc: 'Nigerian Law School externships and university law faculty clinical placements with assigned Chambers counsel mentorship.',
+      cta: 'Internship Portal',
+      icon: GraduationCap,
+      from: 'from-violet-500',
+      to: 'to-violet-700',
+      hint: 'text-violet-700',
+      ring: 'group-hover:border-violet-400'
+    }
+  ];
+
   return (
-    <div className="space-y-16 lg:space-y-24 pb-16">
+    <div className="pb-16">
       {/* Hero Section */}
-      <section className="relative bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 text-white overflow-hidden py-20 lg:py-28 border-b border-amber-900/30">
-        <div className="absolute inset-0 bg-[radial-gradient(#d97706_1px,transparent_1px)] [background-size:24px_24px] opacity-10"></div>
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
-          <div className="max-w-3xl space-y-6">
-            <div className="inline-flex items-center space-x-2 px-3 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-semibold tracking-wide uppercase">
+      <section className="relative overflow-hidden bg-ink-950 text-white">
+        <div
+          className="absolute inset-0 opacity-[0.12] pointer-events-none"
+          style={{
+            backgroundImage: 'linear-gradient(to right, #ffffff 1px, transparent 1px), linear-gradient(to bottom, #ffffff 1px, transparent 1px)',
+            backgroundSize: '56px 56px'
+          }}
+        />
+        <div className="absolute -top-40 -right-24 w-[38rem] h-[38rem] rounded-full bg-accent-600/30 blur-[130px] pointer-events-none" />
+        <div className="absolute bottom-0 left-1/4 w-[30rem] h-[30rem] rounded-full bg-cyan-500/10 blur-[130px] pointer-events-none" />
+
+        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 lg:py-28 grid lg:grid-cols-12 gap-12 lg:gap-16 items-center">
+          <div className="lg:col-span-7 space-y-7">
+            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/5 border border-white/10 text-accent-300 text-[11px] font-semibold uppercase tracking-[0.16em]">
               <Scale className="w-3.5 h-3.5" />
-              <span>{cmsContent?.tagline || 'B. B. BALE & CO. CHAMBERS · NIGERIAN LEGAL PRACTICE'}</span>
+              <span>{cmsContent?.tagline || 'B. B. Bale & Co. Chambers'}</span>
             </div>
 
-            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-serif font-bold tracking-tight text-white leading-tight">
+            <h1 className="font-display text-4xl sm:text-5xl lg:text-6xl xl:text-7xl font-extrabold tracking-tight leading-[1.02]">
               {cmsContent?.heroHeadline || 'Secure. Organized. Professional.'}
             </h1>
 
-            <p className="text-base sm:text-lg text-slate-300 font-light leading-relaxed">
+            <p className="text-base sm:text-lg text-ink-300 font-light leading-relaxed max-w-2xl">
               {cmsContent?.heroSubheadline || 'Distinguished legal representation, trial advocacy, property & recovery of premises management, Islamic law jurisprudence, and institutional law-student mentorship across Nigeria.'}
             </p>
 
-            <div className="pt-4 flex flex-wrap gap-4">
+            <div className="flex flex-wrap gap-3.5 pt-2">
               <button
                 onClick={() => onNavigate('consultation')}
-                className="px-6 py-3.5 bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold text-sm rounded-lg shadow-lg hover:shadow-amber-600/20 transition-all flex items-center space-x-2"
+                className="px-7 py-4 bg-accent-600 hover:bg-accent-500 text-white font-bold text-sm rounded-full shadow-xl shadow-accent-600/30 hover:shadow-accent-500/40 transition-all flex items-center gap-2"
               >
                 <span>Book Legal Consultation</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
               <button
                 onClick={() => onNavigate('tracking')}
-                className="px-6 py-3.5 bg-slate-800 hover:bg-slate-700 text-white font-semibold text-sm rounded-lg border border-slate-700 hover:border-slate-600 transition-all flex items-center space-x-2"
+                className="px-7 py-4 bg-white/5 hover:bg-white/10 text-white font-semibold text-sm rounded-full border border-white/15 hover:border-white/30 backdrop-blur transition-all flex items-center gap-2"
               >
-                <Search className="w-4 h-4 text-amber-400" />
-                <span>Client & Service Tracking Centre</span>
+                <Search className="w-4 h-4 text-accent-300" />
+                <span>Client &amp; Service Tracking</span>
               </button>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-x-7 gap-y-3 pt-4 text-[11px] text-ink-400">
+              <span className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-accent-400" /> Strict branch financial isolation
+              </span>
+              <span className="flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-accent-400" /> Verified receipts &amp; payment audit
+              </span>
+              <span className="flex items-center gap-2">
+                <Clock className="w-4 h-4 text-accent-400" /> Real-time dossier tracking
+              </span>
+            </div>
+          </div>
+
+          {/* Hero side panel */}
+          <div className="lg:col-span-5">
+            <div className="relative rounded-3xl bg-white/5 border border-white/10 backdrop-blur-xl p-6 sm:p-7 shadow-2xl">
+              <div className="absolute -inset-px rounded-3xl bg-gradient-to-br from-accent-500/40 via-transparent to-cyan-500/20 pointer-events-none [mask-image:linear-gradient(black,black)]" />
+              <div className="relative space-y-5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-accent-300">
+                    Chambers at a glance
+                  </span>
+                  <span className="flex items-center gap-1.5 text-[10px] font-semibold text-emerald-300">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> Live
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-3 gap-3 text-center">
+                  <div className="rounded-2xl bg-white/5 border border-white/10 py-4">
+                    <p className="font-display text-2xl font-extrabold text-white">{stats.activeBranches}</p>
+                    <p className="text-[10px] text-ink-400 uppercase font-semibold mt-1">Branches</p>
+                  </div>
+                  <div className="rounded-2xl bg-white/5 border border-white/10 py-4">
+                    <p className="font-display text-2xl font-extrabold text-white">{stats.mattersHandled}</p>
+                    <p className="text-[10px] text-ink-400 uppercase font-semibold mt-1">Matters</p>
+                  </div>
+                  <div className="rounded-2xl bg-white/5 border border-white/10 py-4">
+                    <p className="font-display text-2xl font-extrabold text-accent-300">{stats.propertiesManaged}</p>
+                    <p className="text-[10px] text-ink-400 uppercase font-semibold mt-1">Properties</p>
+                  </div>
+                </div>
+
+                <div className="space-y-3 pt-1">
+                  {[
+                    { n: '01', t: 'Submit your request', d: 'Consultation, property or internship intake.' },
+                    { n: '02', t: 'Track in real time', d: 'Follow your dossier with a unique code.' },
+                    { n: '03', t: 'Verified & cleared', d: 'Payments audited before any matter advances.' }
+                  ].map(step => (
+                    <div key={step.n} className="flex items-start gap-3.5">
+                      <span className="font-display text-xs font-extrabold text-accent-300 w-6 shrink-0 pt-0.5">{step.n}</span>
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-white">{step.t}</p>
+                        <p className="text-[11px] text-ink-400 leading-relaxed">{step.d}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
           </div>
         </div>
       </section>
 
       {/* Quick Access Operational Grid */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-10 sm:-mt-14 relative z-20">
+      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-12 sm:-mt-16 relative z-20">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 sm:gap-6">
-          {/* Card 1: Consultation Booking */}
-          <div 
-            onClick={() => onNavigate('consultation')}
-            className="relative bg-white p-6 sm:p-7 rounded-2xl border border-slate-200/90 shadow-lg hover:shadow-2xl transition-all duration-300 cursor-pointer group hover:border-amber-500/60 hover:-translate-y-1 flex flex-col justify-between overflow-hidden"
-          >
-            <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-amber-600 via-amber-400 to-amber-600 opacity-80 group-hover:opacity-100 transition-opacity" />
-            <div>
-              <div className="flex items-center justify-between mb-4">
-                <div className="w-12 h-12 rounded-xl bg-amber-50 text-amber-700 border border-amber-200/60 flex items-center justify-center group-hover:bg-amber-600 group-hover:text-white group-hover:scale-105 transition-all shadow-xs">
-                  <FileText className="w-6 h-6" />
+          {quickActions.map(card => {
+            const Icon = card.icon;
+            return (
+              <button
+                key={card.id}
+                onClick={() => onNavigate(card.id)}
+                className={`group text-left relative bg-white p-6 rounded-3xl border border-ink-200 shadow-lg hover:shadow-2xl transition-all duration-300 hover:-translate-y-1.5 flex flex-col justify-between overflow-hidden ${card.ring}`}
+              >
+                <div className={`absolute top-0 inset-x-0 h-1 bg-gradient-to-r ${card.from} ${card.to}`} />
+                <div>
+                  <div className="flex items-center justify-between mb-5">
+                    <div className={`w-12 h-12 rounded-2xl bg-gradient-to-br ${card.from} ${card.to} text-white flex items-center justify-center shadow-lg`}>
+                      <Icon className="w-6 h-6" />
+                    </div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full bg-ink-100 text-ink-600 border border-ink-200">
+                      {card.tag}
+                    </span>
+                  </div>
+                  <h3 className="font-display font-bold text-ink-950 text-base mb-2">
+                    {card.title}
+                  </h3>
+                  <p className="text-xs text-ink-600 leading-relaxed">
+                    {card.desc}
+                  </p>
                 </div>
-                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-100/70 text-amber-900 border border-amber-200">
-                  Branch Selection
-                </span>
-              </div>
-              <h3 className="font-serif font-bold text-slate-900 text-base mb-2 group-hover:text-amber-800 transition-colors">
-                Book Legal Consultation
-              </h3>
-              <p className="text-xs text-slate-600 leading-relaxed">
-                Schedule in-person or virtual conferences. Direct branch selection ensures only your chosen branch handles your files.
-              </p>
-            </div>
-            <div className="mt-5 pt-3 border-t border-slate-100 flex items-center justify-between text-xs font-semibold text-amber-800 group-hover:text-amber-700">
-              <span>Book Appointment</span>
-              <ChevronRight className="w-4 h-4 group-hover:translate-x-1.5 transition-transform" />
-            </div>
-          </div>
-
-          {/* Card 2: Public Tracking Centre */}
-          <div 
-            onClick={() => onNavigate('tracking')}
-            className="relative bg-white p-6 sm:p-7 rounded-2xl border border-slate-200/90 shadow-lg hover:shadow-2xl transition-all duration-300 cursor-pointer group hover:border-blue-500/60 hover:-translate-y-1 flex flex-col justify-between overflow-hidden"
-          >
-            <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-blue-600 via-blue-400 to-blue-600 opacity-80 group-hover:opacity-100 transition-opacity" />
-            <div>
-              <div className="flex items-center justify-between mb-4">
-                <div className="w-12 h-12 rounded-xl bg-blue-50 text-blue-700 border border-blue-200/60 flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white group-hover:scale-105 transition-all shadow-xs">
-                  <Search className="w-6 h-6" />
+                <div className="mt-5 pt-4 border-t border-ink-100 flex items-center justify-between text-xs font-bold">
+                  <span className={card.hint}>{card.cta}</span>
+                  <ChevronRight className="w-4 h-4 text-ink-400 group-hover:translate-x-1.5 transition-transform" />
                 </div>
-                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-blue-100/70 text-blue-900 border border-blue-200">
-                  Real-time Dossier
-                </span>
-              </div>
-              <h3 className="font-serif font-bold text-slate-900 text-base mb-2 group-hover:text-blue-800 transition-colors">
-                Public Tracking Centre
-              </h3>
-              <p className="text-xs text-slate-600 leading-relaxed">
-                Securely track litigation dockets, consultation clearances, tenancy notices, and real-time payment confirmation status.
-              </p>
-            </div>
-            <div className="mt-5 pt-3 border-t border-slate-100 flex items-center justify-between text-xs font-semibold text-blue-800 group-hover:text-blue-700">
-              <span>Track Record</span>
-              <ChevronRight className="w-4 h-4 group-hover:translate-x-1.5 transition-transform" />
-            </div>
-          </div>
-
-          {/* Card 3: Landlord Property Registration & Portfolio */}
-          <div 
-            onClick={() => onNavigate('property-register')}
-            className="relative bg-white p-6 sm:p-7 rounded-2xl border border-slate-200/90 shadow-lg hover:shadow-2xl transition-all duration-300 cursor-pointer group hover:border-emerald-500/60 hover:-translate-y-1 flex flex-col justify-between overflow-hidden"
-          >
-            <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-emerald-600 via-emerald-400 to-emerald-600 opacity-80 group-hover:opacity-100 transition-opacity" />
-            <div>
-              <div className="flex items-center justify-between mb-4">
-                <div className="w-12 h-12 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200/60 flex items-center justify-center group-hover:bg-emerald-600 group-hover:text-white group-hover:scale-105 transition-all shadow-xs">
-                  <Building2 className="w-6 h-6" />
-                </div>
-                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-100/70 text-emerald-900 border border-emerald-200">
-                  Landlord Registry
-                </span>
-              </div>
-              <h3 className="font-serif font-bold text-slate-900 text-base mb-2 group-hover:text-emerald-800 transition-colors">
-                Landlord & Property Portal
-              </h3>
-              <p className="text-xs text-slate-600 leading-relaxed">
-                Register property, add multiple units under same Landlord Code, select branch, upload mandatory photos, and verify fee payments.
-              </p>
-            </div>
-            <div className="mt-5 pt-3 border-t border-slate-100 flex items-center justify-between text-xs font-semibold text-emerald-800 group-hover:text-emerald-700">
-              <span>Register Property</span>
-              <ChevronRight className="w-4 h-4 group-hover:translate-x-1.5 transition-transform" />
-            </div>
-          </div>
-
-          {/* Card 4: Law Student Internships */}
-          <div 
-            onClick={() => onNavigate('internship')}
-            className="relative bg-white p-6 sm:p-7 rounded-2xl border border-slate-200/90 shadow-lg hover:shadow-2xl transition-all duration-300 cursor-pointer group hover:border-purple-500/60 hover:-translate-y-1 flex flex-col justify-between overflow-hidden"
-          >
-            <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-purple-600 via-purple-400 to-purple-600 opacity-80 group-hover:opacity-100 transition-opacity" />
-            <div>
-              <div className="flex items-center justify-between mb-4">
-                <div className="w-12 h-12 rounded-xl bg-purple-50 text-purple-700 border border-purple-200/60 flex items-center justify-center group-hover:bg-purple-600 group-hover:text-white group-hover:scale-105 transition-all shadow-xs">
-                  <GraduationCap className="w-6 h-6" />
-                </div>
-                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-purple-100/70 text-purple-900 border border-purple-200">
-                  NLS Placement
-                </span>
-              </div>
-              <h3 className="font-serif font-bold text-slate-900 text-base mb-2 group-hover:text-purple-800 transition-colors">
-                Student Internships
-              </h3>
-              <p className="text-xs text-slate-600 leading-relaxed">
-                Nigerian Law School externships & university law faculty clinical placements with assigned Chambers counsel mentorship.
-              </p>
-            </div>
-            <div className="mt-5 pt-3 border-t border-slate-100 flex items-center justify-between text-xs font-semibold text-purple-800 group-hover:text-purple-700">
-              <span>Internship Portal</span>
-              <ChevronRight className="w-4 h-4 group-hover:translate-x-1.5 transition-transform" />
-            </div>
-          </div>
+              </button>
+            );
+          })}
         </div>
       </section>
 
       {/* Real Live Chambers Metric Counter */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-8 sm:p-10 lg:p-12 shadow-2xl border border-amber-500/30 text-white">
-          {/* Subtle gold gradient accent bar */}
-          <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-amber-600 via-amber-400 to-amber-600" />
-          
-          <div className="text-center max-w-2xl mx-auto mb-10">
-            <span className="inline-flex items-center space-x-1.5 text-xs font-serif uppercase tracking-widest text-amber-400 font-bold bg-amber-400/10 px-3 py-1 rounded-full border border-amber-400/20">
-              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-20 lg:mt-24">
+        <div className="relative overflow-hidden rounded-3xl bg-ink-950 p-8 sm:p-10 lg:p-12 text-white">
+          <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-accent-600 via-accent-400 to-cyan-400" />
+          <div className="absolute -bottom-24 right-0 w-96 h-96 rounded-full bg-accent-600/20 blur-[120px] pointer-events-none" />
+
+          <div className="relative text-center max-w-2xl mx-auto mb-10">
+            <span className="inline-flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.18em] text-accent-300 bg-white/5 px-3.5 py-1.5 rounded-full border border-white/10">
+              <span className="w-1.5 h-1.5 rounded-full bg-accent-400 animate-pulse" />
               <span>Chambers Operational Scale</span>
             </span>
-            <h2 className="text-2xl sm:text-3xl font-serif font-bold mt-3 text-white">
+            <h2 className="font-display text-2xl sm:text-3xl font-extrabold mt-4 text-white">
               Integrated National Practice
             </h2>
-            <p className="text-xs sm:text-sm text-slate-300 mt-2">
+            <p className="text-xs sm:text-sm text-ink-300 mt-2">
               Live operational metrics maintained across our multi-branch infrastructure.
             </p>
           </div>
 
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 lg:gap-6 text-center">
-            <div className="bg-slate-900/80 border border-slate-800/80 rounded-xl p-4 lg:p-5 hover:border-amber-500/40 transition-colors shadow-inner">
-              <p className="text-3xl sm:text-4xl font-serif font-bold text-amber-400">{stats.activeBranches}</p>
-              <p className="text-xs text-slate-300 mt-1 uppercase font-semibold">Chambers Branches</p>
-              <p className="text-[11px] text-amber-300/80 font-mono mt-0.5 truncate">
+          <div className="relative grid grid-cols-2 lg:grid-cols-5 gap-4 lg:gap-5 text-center">
+            <div className="bg-white/5 border border-white/10 rounded-2xl p-4 lg:p-5 hover:border-accent-500/40 transition-colors">
+              <p className="font-display text-3xl sm:text-4xl font-extrabold text-accent-300">{stats.activeBranches}</p>
+              <p className="text-[11px] text-ink-300 mt-1 uppercase font-semibold">Chambers Branches</p>
+              <p className="text-[10px] text-accent-300/70 font-mono mt-0.5 truncate">
                 {branches.length > 0 ? branches.map(b => b.code).join(' · ') : 'Abuja HQ'}
               </p>
             </div>
-            <div className="bg-slate-900/80 border border-slate-800/80 rounded-xl p-4 lg:p-5 hover:border-amber-500/40 transition-colors shadow-inner">
-              <p className="text-3xl sm:text-4xl font-serif font-bold text-white">{stats.mattersHandled}</p>
-              <p className="text-xs text-slate-300 mt-1 uppercase font-semibold">Active Legal Matters</p>
-              <p className="text-[11px] text-slate-400 mt-0.5">Intake & Retainers</p>
+            <div className="bg-white/5 border border-white/10 rounded-2xl p-4 lg:p-5 hover:border-accent-500/40 transition-colors">
+              <p className="font-display text-3xl sm:text-4xl font-extrabold text-white">{stats.mattersHandled}</p>
+              <p className="text-[11px] text-ink-300 mt-1 uppercase font-semibold">Active Legal Matters</p>
+              <p className="text-[10px] text-ink-400 mt-0.5">Intake &amp; Retainers</p>
             </div>
-            <div className="bg-slate-900/80 border border-slate-800/80 rounded-xl p-4 lg:p-5 hover:border-amber-500/40 transition-colors shadow-inner">
-              <p className="text-3xl sm:text-4xl font-serif font-bold text-white">{stats.casesListed}</p>
-              <p className="text-xs text-slate-300 mt-1 uppercase font-semibold">Litigation Cases</p>
-              <p className="text-[11px] text-slate-400 mt-0.5">Federal & State Dockets</p>
+            <div className="bg-white/5 border border-white/10 rounded-2xl p-4 lg:p-5 hover:border-accent-500/40 transition-colors">
+              <p className="font-display text-3xl sm:text-4xl font-extrabold text-white">{stats.casesListed}</p>
+              <p className="text-[11px] text-ink-300 mt-1 uppercase font-semibold">Litigation Cases</p>
+              <p className="text-[10px] text-ink-400 mt-0.5">Federal &amp; State Dockets</p>
             </div>
-            <div className="bg-slate-900/80 border border-slate-800/80 rounded-xl p-4 lg:p-5 hover:border-amber-500/40 transition-colors shadow-inner">
-              <p className="text-3xl sm:text-4xl font-serif font-bold text-white">{stats.propertiesManaged}</p>
-              <p className="text-xs text-slate-300 mt-1 uppercase font-semibold">Managed Properties</p>
-              <p className="text-[11px] text-slate-400 mt-0.5">Commercial & Residential</p>
+            <div className="bg-white/5 border border-white/10 rounded-2xl p-4 lg:p-5 hover:border-accent-500/40 transition-colors">
+              <p className="font-display text-3xl sm:text-4xl font-extrabold text-white">{stats.propertiesManaged}</p>
+              <p className="text-[11px] text-ink-300 mt-1 uppercase font-semibold">Managed Properties</p>
+              <p className="text-[10px] text-ink-400 mt-0.5">Commercial &amp; Residential</p>
             </div>
-            <div className="bg-slate-900/80 border border-slate-800/80 rounded-xl p-4 lg:p-5 hover:border-amber-500/40 transition-colors shadow-inner col-span-2 lg:col-span-1">
-              <p className="text-3xl sm:text-4xl font-serif font-bold text-amber-400">{stats.studentsPlaced}</p>
-              <p className="text-xs text-slate-300 mt-1 uppercase font-semibold">Law Students Placed</p>
-              <p className="text-[11px] text-slate-400 mt-0.5">Externships & Interns</p>
+            <div className="bg-white/5 border border-white/10 rounded-2xl p-4 lg:p-5 hover:border-accent-500/40 transition-colors col-span-2 lg:col-span-1">
+              <p className="font-display text-3xl sm:text-4xl font-extrabold text-accent-300">{stats.studentsPlaced}</p>
+              <p className="text-[11px] text-ink-300 mt-1 uppercase font-semibold">Law Students Placed</p>
+              <p className="text-[10px] text-ink-400 mt-0.5">Externships &amp; Interns</p>
             </div>
           </div>
         </div>
       </section>
 
       {/* Real-time Lawyer Availability Board */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-20 lg:mt-24">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-8 gap-4">
           <div>
-            <span className="text-xs font-serif uppercase tracking-widest text-amber-700 font-bold">
-              Transparency & Accessibility
+            <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-accent-600">
+              Transparency &amp; Accessibility
             </span>
-            <h2 className="text-2xl sm:text-3xl font-serif font-bold text-slate-900 mt-1">
+            <h2 className="font-display text-2xl sm:text-3xl font-extrabold text-ink-950 mt-2">
               Counsel Real-Time Availability Board
             </h2>
-            <p className="text-xs sm:text-sm text-slate-600 mt-1">
+            <p className="text-xs sm:text-sm text-ink-600 mt-1">
               Real-time professional engagement status of Chambers advocates and partners.
             </p>
           </div>
           <button
             onClick={() => onNavigate('counsel')}
-            className="text-xs font-bold text-amber-800 hover:text-amber-900 flex items-center space-x-1"
+            className="text-xs font-bold text-accent-700 hover:text-accent-800 flex items-center gap-1.5"
           >
             <span>View All Counsel Profiles</span>
             <ArrowRight className="w-3.5 h-3.5" />
@@ -345,28 +386,28 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {counselList.map(counsel => (
-            <div 
-              key={counsel.id} 
-              className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs flex items-start space-x-4 hover:border-slate-300 transition-colors"
+            <div
+              key={counsel.id}
+              className="bg-white rounded-3xl border border-ink-200 p-5 shadow-sm flex items-start gap-4 hover:shadow-lg hover:-translate-y-0.5 transition-all"
             >
               {counsel.photoUrl ? (
                 <img
                   src={counsel.photoUrl}
                   alt={counsel.name}
-                  className="w-16 h-16 rounded-lg object-cover border border-slate-200 shrink-0"
+                  className="w-16 h-16 rounded-2xl object-cover border border-ink-200 shrink-0"
                 />
               ) : (
-                <div className="w-16 h-16 rounded-lg bg-amber-900/10 border border-amber-600/30 flex items-center justify-center text-amber-900 font-serif font-bold text-lg shrink-0">
+                <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-accent-500 to-accent-700 flex items-center justify-center text-white font-display font-bold text-lg shrink-0">
                   {counsel.name.split(' ').map(n => n[0]).filter(Boolean).slice(0, 2).join('')}
                 </div>
               )}
               <div className="flex-1 min-w-0">
-                <div className="mb-1">{getStatusBadge(counsel.availability)}</div>
-                <h3 className="font-serif font-bold text-sm text-slate-950 truncate">{counsel.name}</h3>
-                <p className="text-xs text-amber-800 font-medium truncate">{counsel.title}</p>
-                <div className="mt-2 flex flex-wrap gap-1">
+                <div className="mb-2">{getStatusBadge(counsel.availability)}</div>
+                <h3 className="font-display font-bold text-sm text-ink-950 truncate">{counsel.name}</h3>
+                <p className="text-xs text-accent-700 font-medium truncate">{counsel.title}</p>
+                <div className="mt-2.5 flex flex-wrap gap-1.5">
                   {counsel.practiceAreas.slice(0, 2).map((area, idx) => (
-                    <span key={idx} className="text-[10px] text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded">
+                    <span key={idx} className="text-[10px] text-ink-600 bg-ink-100 px-2 py-0.5 rounded-full">
                       {area}
                     </span>
                   ))}
@@ -378,99 +419,64 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
       </section>
 
       {/* Core Practice Areas */}
-      <section className="bg-slate-100/70 py-16 border-y border-slate-200">
+      <section className="bg-ink-100 py-16 lg:py-20 border-y border-ink-200 mt-20 lg:mt-24">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center max-w-2xl mx-auto mb-12">
-            <span className="text-xs font-serif uppercase tracking-widest text-amber-700 font-bold">
+            <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-accent-600">
               Chambers Practice Competence
             </span>
-            <h2 className="text-2xl sm:text-3xl font-serif font-bold text-slate-900 mt-1">
+            <h2 className="font-display text-2xl sm:text-3xl font-extrabold text-ink-950 mt-2">
               Specialized Legal Practice Areas
             </h2>
-            <p className="text-xs sm:text-sm text-slate-600 mt-2">
+            <p className="text-xs sm:text-sm text-ink-600 mt-2">
               Comprehensive counsel and representation under Nigerian law, tailored to the specific jurisdictional nuances of each state.
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-            <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xs">
-              <h3 className="font-serif font-bold text-base text-slate-900 mb-2">
-                Litigation & Appellate Advocacy
-              </h3>
-              <p className="text-xs text-slate-600 leading-relaxed mb-4">
-                Trial advocacy across the Supreme Court of Nigeria, Court of Appeal, Federal High Court, and State High Courts in civil, constitutional, and commercial disputes.
-              </p>
-              <span className="text-xs font-semibold text-amber-700">Supreme Court · Court of Appeal · High Courts</span>
-            </div>
-
-            <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xs">
-              <h3 className="font-serif font-bold text-base text-slate-900 mb-2">
-                Property & Recovery of Premises
-              </h3>
-              <p className="text-xs text-slate-600 leading-relaxed mb-4">
-                Statutory tenancy agreements, rent collection enforcement, determination of statutory notice periods, and recovery proceedings before competent courts.
-              </p>
-              <span className="text-xs font-semibold text-amber-700">Tenancy Agreements · Statutory Notices · Eviction Actions</span>
-            </div>
-
-            <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xs">
-              <h3 className="font-serif font-bold text-base text-slate-900 mb-2">
-                Islamic Law & Sharia Jurisprudence
-              </h3>
-              <p className="text-xs text-slate-600 leading-relaxed mb-4">
-                Representation before Upper Sharia Courts and Sharia Courts of Appeal in matters of Islamic inheritance (Mirath), family jurisprudence, and Islamic commercial contracts.
-              </p>
-              <span className="text-xs font-semibold text-amber-700">Mirath / Succession · Family Jurisprudence · Sharia Courts</span>
-            </div>
-
-            <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xs">
-              <h3 className="font-serif font-bold text-base text-slate-900 mb-2">
-                Corporate & Commercial Transactions
-              </h3>
-              <p className="text-xs text-slate-600 leading-relaxed mb-4">
-                Corporate Affairs Commission filings, joint ventures, banking compliance, debt recovery, and cross-border commercial drafting.
-              </p>
-              <span className="text-xs font-semibold text-amber-700">CAC Filings · Commercial Contracts · Debt Recovery</span>
-            </div>
-
-            <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xs">
-              <h3 className="font-serif font-bold text-base text-slate-900 mb-2">
-                Energy, Oil & Gas Law
-              </h3>
-              <p className="text-xs text-slate-600 leading-relaxed mb-4">
-                Advisory on Petroleum Industry Act (PIA) compliance, licensing, host community development trusts, and gas commercialization agreements.
-              </p>
-              <span className="text-xs font-semibold text-amber-700">Petroleum Industry Act · Host Community Trusts · Upstream</span>
-            </div>
-
-            <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xs">
-              <h3 className="font-serif font-bold text-base text-slate-900 mb-2">
-                Arbitration & Dispute Resolution
-              </h3>
-              <p className="text-xs text-slate-600 leading-relaxed mb-4">
-                Representation in commercial arbitrations under the Arbitration and Mediation Act 2023, mediation settlements, and enforcement of arbitral awards.
-              </p>
-              <span className="text-xs font-semibold text-amber-700">Domestic & International Arbitration · Mediation</span>
-            </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {[
+              { t: 'Litigation & Appellate Advocacy', d: 'Trial advocacy across the Supreme Court of Nigeria, Court of Appeal, Federal High Court, and State High Courts in civil, constitutional, and commercial disputes.', k: 'Supreme Court · Court of Appeal · High Courts' },
+              { t: 'Property & Recovery of Premises', d: 'Statutory tenancy agreements, rent collection enforcement, determination of statutory notice periods, and recovery proceedings before competent courts.', k: 'Tenancy Agreements · Statutory Notices · Eviction Actions' },
+              { t: 'Islamic Law & Sharia Jurisprudence', d: 'Representation before Upper Sharia Courts and Sharia Courts of Appeal in matters of Islamic inheritance (Mirath), family jurisprudence, and Islamic commercial contracts.', k: 'Mirath / Succession · Family Jurisprudence · Sharia Courts' },
+              { t: 'Corporate & Commercial Transactions', d: 'Corporate Affairs Commission filings, joint ventures, banking compliance, debt recovery, and cross-border commercial drafting.', k: 'CAC Filings · Commercial Contracts · Debt Recovery' },
+              { t: 'Energy, Oil & Gas Law', d: 'Advisory on Petroleum Industry Act (PIA) compliance, licensing, host community development trusts, and gas commercialization agreements.', k: 'Petroleum Industry Act · Host Community Trusts · Upstream' },
+              { t: 'Arbitration & Dispute Resolution', d: 'Representation in commercial arbitrations under the Arbitration and Mediation Act 2023, mediation settlements, and enforcement of arbitral awards.', k: 'Domestic & International Arbitration · Mediation' }
+            ].map(area => (
+              <div
+                key={area.t}
+                className="group bg-white p-6 rounded-3xl border border-ink-200 shadow-sm hover:shadow-xl hover:border-accent-300 transition-all"
+              >
+                <div className="w-10 h-10 rounded-2xl bg-accent-50 text-accent-600 flex items-center justify-center mb-4 group-hover:bg-accent-600 group-hover:text-white transition-colors">
+                  <Briefcase className="w-5 h-5" />
+                </div>
+                <h3 className="font-display font-bold text-base text-ink-950 mb-2">
+                  {area.t}
+                </h3>
+                <p className="text-xs text-ink-600 leading-relaxed mb-4">
+                  {area.d}
+                </p>
+                <span className="text-[11px] font-semibold text-accent-700">{area.k}</span>
+              </div>
+            ))}
           </div>
         </div>
       </section>
 
       {/* Public Notice Board Section */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="bg-white rounded-2xl border border-slate-200 p-8 shadow-sm">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 pb-4 border-b border-slate-200 gap-2">
+      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-20 lg:mt-24">
+        <div className="bg-white rounded-3xl border border-ink-200 p-8 shadow-sm">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 pb-5 border-b border-ink-100 gap-2">
             <div>
-              <span className="text-xs font-serif uppercase tracking-widest text-amber-700 font-bold">
+              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-accent-600">
                 Chambers Notice Board
               </span>
-              <h2 className="text-xl sm:text-2xl font-serif font-bold text-slate-900">
-                Official Announcements & Advisories
+              <h2 className="font-display text-xl sm:text-2xl font-extrabold text-ink-950 mt-1">
+                Official Announcements &amp; Advisories
               </h2>
             </div>
             <button
               onClick={() => onNavigate('notices')}
-              className="text-xs font-bold text-amber-700 hover:text-amber-800 flex items-center space-x-1"
+              className="text-xs font-bold text-accent-700 hover:text-accent-800 flex items-center gap-1.5"
             >
               <span>View Full Notice Board</span>
               <ArrowRight className="w-3.5 h-3.5" />
@@ -479,17 +485,17 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
 
           <div className="space-y-4">
             {notices.map(notice => (
-              <div key={notice.id} className="p-4 bg-slate-50 rounded-lg border border-slate-200">
+              <div key={notice.id} className="p-5 bg-ink-50 rounded-2xl border border-ink-200 hover:border-accent-300 transition-colors">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 mb-2">
-                  <span className="text-[11px] font-bold text-amber-800 uppercase tracking-wide">
+                  <span className="text-[10px] font-bold text-accent-700 uppercase tracking-wider bg-accent-50 border border-accent-200 px-2.5 py-0.5 rounded-full inline-block w-fit">
                     {notice.category}
                   </span>
-                  <span className="text-[11px] text-slate-500 font-mono">
+                  <span className="text-[11px] text-ink-500 font-mono">
                     Published: {notice.publishDate} · by {notice.publishedByName}
                   </span>
                 </div>
-                <h3 className="font-serif font-bold text-base text-slate-900 mb-1">{notice.title}</h3>
-                <p className="text-xs text-slate-600 leading-relaxed">{notice.content}</p>
+                <h3 className="font-display font-bold text-base text-ink-950 mb-1">{notice.title}</h3>
+                <p className="text-xs text-ink-600 leading-relaxed">{notice.content}</p>
               </div>
             ))}
           </div>
@@ -497,36 +503,36 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
       </section>
 
       {/* Multi-Branch Presence */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-20 lg:mt-24">
         <div className="text-center max-w-2xl mx-auto mb-10">
-          <span className="text-xs font-serif uppercase tracking-widest text-amber-700 font-bold">
+          <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-accent-600">
             Nationwide Presence
           </span>
-          <h2 className="text-2xl sm:text-3xl font-serif font-bold text-slate-900 mt-1">
+          <h2 className="font-display text-2xl sm:text-3xl font-extrabold text-ink-950 mt-2">
             Chambers Branches Across Nigeria
           </h2>
-          <p className="text-xs sm:text-sm text-slate-600 mt-2">
+          <p className="text-xs sm:text-sm text-ink-600 mt-2">
             Seamlessly linked under the executive stewardship of the Principal Partner.
           </p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {branches.map(branch => (
-            <div key={branch.id} className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs flex flex-col justify-between">
+            <div key={branch.id} className="bg-white p-5 rounded-3xl border border-ink-200 shadow-sm flex flex-col justify-between hover:shadow-lg transition-all">
               <div>
                 <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs font-bold font-mono px-2 py-0.5 bg-slate-100 text-slate-700 rounded">
+                  <span className="text-xs font-bold font-mono px-2.5 py-1 bg-ink-100 text-ink-700 rounded-full">
                     {branch.code}
                   </span>
                   <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
                 </div>
-                <h3 className="font-serif font-bold text-sm text-slate-900 mb-1">{branch.name}</h3>
-                <p className="text-xs text-slate-500 mb-2 font-medium">{branch.state}</p>
-                <p className="text-xs text-slate-600 leading-relaxed mb-3">{branch.address}</p>
+                <h3 className="font-display font-bold text-sm text-ink-950 mb-1">{branch.name}</h3>
+                <p className="text-xs text-ink-500 mb-2 font-medium">{branch.state}</p>
+                <p className="text-xs text-ink-600 leading-relaxed mb-3">{branch.address}</p>
               </div>
-              <div className="pt-3 border-t border-slate-100 text-[11px] text-slate-500 space-y-1">
-                <p><span className="font-semibold text-slate-700">Phone:</span> {branch.phone}</p>
-                <p><span className="font-semibold text-slate-700">Email:</span> {branch.email}</p>
+              <div className="pt-3 border-t border-ink-100 text-[11px] text-ink-500 space-y-1">
+                <p><span className="font-semibold text-ink-700">Phone:</span> {branch.phone}</p>
+                <p><span className="font-semibold text-ink-700">Email:</span> {branch.email}</p>
               </div>
             </div>
           ))}
