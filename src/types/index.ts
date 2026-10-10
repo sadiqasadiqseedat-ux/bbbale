@@ -489,6 +489,22 @@ export type InvoicePurpose =
 /** The kind of paid service an invoice/payment settles. */
 export type PaymentServiceType = 'CONSULTATION' | 'PROPERTY' | 'GENERAL';
 
+/**
+ * Canonical invoice purpose codes. The payment-verification dispatch reads this
+ * to know WHICH entity a verified invoice settles (see src/server/paymentDispatch.ts).
+ */
+export const INVOICE_PURPOSE_TYPES = [
+  'PROPERTY_REGISTRATION',
+  'PROPERTY_ADDITION',
+  'CONSULTATION',
+  'TENANCY_NOTICE',
+  'MATTER_RETAINER',
+  'INTERNSHIP',
+  'OTHER'
+] as const;
+
+export type InvoicePurposeType = (typeof INVOICE_PURPOSE_TYPES)[number];
+
 export interface Invoice {
   id: string;
   invoiceNumber: string;
@@ -502,6 +518,10 @@ export interface Invoice {
   consultationCode?: string;
   /** Explicit purpose of the invoice (InvoicePurpose). */
   purpose?: InvoicePurpose;
+  /** Canonical purpose that drives the verification dispatch (InvoicePurposeType). */
+  purposeType?: InvoicePurposeType;
+  /** Id of the entity the invoice settles (property.id, consultation.id, ...). */
+  purposeEntityId?: string;
   /** Explicit service relationship used during payment verification. */
   serviceType?: PaymentServiceType;
   serviceRef?: string;
