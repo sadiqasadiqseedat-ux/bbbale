@@ -173,7 +173,7 @@ export const PropertiesView: React.FC = () => {
       landlordId: landlord.id,
       branchId: getCreationBranchId(),
       imageUrl: propImagePreview || undefined,
-      registrationPaymentStatus: 'PAID_CONFIRMED',
+      registrationPaymentStatus: 'PENDING_PAYMENT',
       registrationFee: 50000,
       totalUnits: Number(propForm.totalUnits) || 1,
       titleInformation: propForm.titleInformation,

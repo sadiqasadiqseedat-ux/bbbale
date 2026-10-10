@@ -35,7 +35,8 @@ import {
   UserRole,
   UserSession,
   WebsiteContent,
-  QuitNotice
+  QuitNotice,
+  Receipt
 } from '../types';
 import { 
   generateSalt, 
@@ -316,6 +317,7 @@ const STORAGE_KEYS = {
   QUIT_NOTICES: 'bb_quit_notices_v1',
   INVOICES: 'bb_invoices_v1',
   PAYMENTS: 'bb_payments_v1',
+  RECEIPTS: 'bb_receipts_v1',
   EXPENSES: 'bb_expenses_v1',
   STUDENTS: 'bb_students_v1',
   ATTENDANCE: 'bb_attendance_v1',
@@ -379,6 +381,7 @@ class MemoryCache {
   quitNotices: QuitNotice[] = [];
   invoices: Invoice[] = [];
   payments: PaymentRecord[] = [];
+  receipts: Receipt[] = [];
   expenses: ExpenseRecord[] = [];
   students: StudentProfile[] = [];
   attendance: InternshipAttendance[] = [];
@@ -540,6 +543,10 @@ function applyServerData(d: any) {
   if (Array.isArray(d.payments)) {
     memory.payments = d.payments;
     setToStorage(STORAGE_KEYS.PAYMENTS, d.payments);
+  }
+  if (Array.isArray(d.receipts)) {
+    memory.receipts = d.receipts;
+    setToStorage(STORAGE_KEYS.RECEIPTS, d.receipts);
   }
   if (Array.isArray(d.expenses)) {
     memory.expenses = d.expenses;
@@ -1379,11 +1386,22 @@ export const storageService = {
     return { consultation: newConsultation, invoice: newInvoice, paymentRef };
   },
 
-  updateConsultation: (consultation: Consultation, actor: User): void => {
+  updateConsultation: async (consultation: Consultation, actor: User): Promise<{ success: boolean; error?: string }> => {
+    try {
+      await apiFetch(`/api/consultations/${consultation.id}`, {
+        method: 'PUT',
+        body: JSON.stringify(consultation)
+      });
+    } catch (err: any) {
+      console.error('Failed updating consultation in D1:', err);
+      return { success: false, error: err?.message || 'Failed updating consultation.' };
+    }
+
     memory.consultations = memory.consultations.map(c => c.id === consultation.id ? consultation : c);
     setToStorage(STORAGE_KEYS.CONSULTATIONS, memory.consultations);
     notifySubscribers();
     logAudit(actor, 'UPDATE_CONSULTATION', 'Consultation', consultation.id, `Updated consultation ${consultation.code}`);
+    return { success: true };
   },
 
   // Invoices & Billing
@@ -1416,18 +1434,24 @@ export const storageService = {
     return newInvoice;
   },
 
-  updateInvoice: (updatedInvoice: Invoice, actor: User): { success: boolean; error?: string } => {
+  updateInvoice: async (updatedInvoice: Invoice, actor: User): Promise<{ success: boolean; error?: string }> => {
     if (actor.role !== 'PRINCIPAL_PARTNER' && actor.role !== 'HEAD_OF_CHAMBER' && actor.role !== 'ACCOUNT_OFFICER') {
-      return { success: false, error: 'Unauthorized' };
+      return { success: false, error: 'Unauthorized: Only billing-authorized personnel can modify invoices.' };
     }
+
+    try {
+      await apiFetch(`/api/invoices/${updatedInvoice.id}`, {
+        method: 'PUT',
+        body: JSON.stringify(updatedInvoice)
+      });
+    } catch (err: any) {
+      console.error('Failed updating invoice in D1:', err);
+      return { success: false, error: err?.message || 'Failed updating invoice.' };
+    }
+
     memory.invoices = memory.invoices.map(i => i.id === updatedInvoice.id ? updatedInvoice : i);
     setToStorage(STORAGE_KEYS.INVOICES, memory.invoices);
     notifySubscribers();
-
-    apiFetch(`/api/invoices/${updatedInvoice.id}`, {
-      method: 'PUT',
-      body: JSON.stringify(updatedInvoice)
-    }).catch(e => console.error('Failed updating invoice in D1:', e));
 
     logAudit(actor, 'UPDATE_INVOICE', 'Invoice', updatedInvoice.id, `Updated invoice ${updatedInvoice.invoiceNumber}`);
     return { success: true };
@@ -1510,7 +1534,22 @@ export const storageService = {
       return inv;
     });
     setToStorage(STORAGE_KEYS.INVOICES, memory.invoices);
+
+    // Update consultation status locally if linked
+    memory.consultations = memory.consultations.map(c => {
+      if (c.invoiceNumber === data.invoiceNumber || c.paymentReference === data.paymentReference) {
+        return {
+          ...c,
+          status: 'Payment Verification Pending',
+          clientVisibleUpdate: 'Payment submitted. Awaiting verification by the Account Officer.'
+        };
+      }
+      return c;
+    });
+    setToStorage(STORAGE_KEYS.CONSULTATIONS, memory.consultations);
+
     notifySubscribers();
+    storageService.syncWithServer().catch(() => {});
 
     return newPayment;
   },
@@ -1552,6 +1591,8 @@ export const storageService = {
 
     const verified = memory.payments.find(p => p.id === paymentId);
     if (verified) {
+      const targetInvoice = memory.invoices.find(inv => inv.invoiceNumber === verified.invoiceNumber);
+
       memory.invoices = memory.invoices.map(inv =>
         inv.invoiceNumber === verified.invoiceNumber
           ? { ...inv, paymentStatus: (isApproved ? 'PAYMENT_VERIFIED' : 'UNPAID') as Invoice['paymentStatus'] }
@@ -1577,20 +1618,48 @@ export const storageService = {
       setToStorage(STORAGE_KEYS.CONSULTATIONS, memory.consultations);
 
       // Activate ONLY the property explicitly linked to this payment.
-      if (isApproved && verified.serviceType === 'PROPERTY' && verified.serviceRef) {
+      const propertyRef = (verified.serviceType === 'PROPERTY' ? verified.serviceRef : undefined) ||
+                          targetInvoice?.propertyId ||
+                          (targetInvoice?.serviceType === 'PROPERTY' ? targetInvoice.serviceRef : undefined);
+      if (isApproved && propertyRef) {
         memory.properties = memory.properties.map(prop =>
-          prop.id === verified.serviceRef
+          (prop.id === propertyRef || prop.propertyId === propertyRef)
             ? { ...prop, registrationPaymentStatus: 'PAID_CONFIRMED', legalStatus: 'Managed by Chambers' }
             : prop
         );
         setToStorage(STORAGE_KEYS.PROPERTIES, memory.properties);
       }
+
+      // Add durable receipt to cache if approved
+      if (isApproved && receiptNumber) {
+        const newReceipt: Receipt = {
+          id: `rec-${Date.now()}`,
+          receiptNumber,
+          paymentReference: verified.paymentReference,
+          invoiceNumber: verified.invoiceNumber,
+          clientName: verified.clientName,
+          amount: verified.amount,
+          paymentMethod: verified.paymentMethod || 'Bank Transfer',
+          issuedDate: new Date().toISOString(),
+          issuedById: actor.id,
+          issuedByName: actor.name,
+          createdAt: new Date().toISOString()
+        };
+        memory.receipts = [newReceipt, ...memory.receipts.filter(r => r.receiptNumber !== receiptNumber)];
+        setToStorage(STORAGE_KEYS.RECEIPTS, memory.receipts);
+      }
     }
     notifySubscribers();
+    storageService.syncWithServer().catch(() => {});
 
     logAudit(actor, isApproved ? 'VERIFY_PAYMENT' : 'REJECT_PAYMENT', 'Payment', paymentId, `${isApproved ? 'Verified' : 'Rejected'} payment of ₦${verified?.amount.toLocaleString()}`);
     return { success: true, receiptNumber, status: newStatus };
   },
+
+  // Receipts
+  getReceipts: (): Receipt[] => memory.receipts,
+  getReceiptByNumber: (num: string): Receipt | undefined => memory.receipts.find(r => r.receiptNumber.trim() === num.trim()),
+  getReceiptByPaymentRef: (ref: string): Receipt | undefined => memory.receipts.find(r => r.paymentReference.trim() === ref.trim()),
 
   // Expenses
   getExpenses: (): ExpenseRecord[] => memory.expenses,
@@ -1985,11 +2054,55 @@ export const storageService = {
     };
     memory.properties = [newProp, ...memory.properties];
     setToStorage(STORAGE_KEYS.PROPERTIES, memory.properties);
+
+    let invoiceNumber: string | undefined;
+    let paymentRef: string | undefined;
+    let invoiceId: string | undefined;
+
+    if (newProp.registrationPaymentStatus === 'PENDING_PAYMENT' && newProp.registrationFee > 0) {
+      invoiceNumber = getNextNumber('invoice', 'INV');
+      paymentRef = getNextNumber('payment', 'PAY');
+      invoiceId = `inv-${Date.now()}`;
+      const landlord = memory.landlords.find(l => l.id === newProp.landlordId);
+      const newInvoice: Invoice = {
+        id: invoiceId,
+        invoiceNumber,
+        clientName: landlord ? `${landlord.fullName} (Landlord)` : `Property Owner (${newProp.name})`,
+        clientEmail: landlord?.email || '',
+        clientPhone: landlord?.phone || '',
+        branchId: newProp.branchId,
+        purpose: 'ADDITIONAL_PROPERTY_REGISTRATION',
+        serviceType: 'PROPERTY',
+        serviceRef: newProp.id,
+        propertyId: newProp.id,
+        landlordId: newProp.landlordId,
+        items: [{
+          description: `Property Registration & Documentation Fee — ${newProp.name} (${newProp.propertyId})`,
+          amount: newProp.registrationFee
+        }],
+        subtotal: newProp.registrationFee,
+        taxAmount: 0,
+        totalAmount: newProp.registrationFee,
+        date: new Date().toISOString().split('T')[0],
+        dueDate: new Date(Date.now() + 86400000 * 7).toISOString().split('T')[0],
+        paymentStatus: 'UNPAID',
+        paymentReference: paymentRef,
+        notes: `Property ID: ${newProp.propertyId}. The property becomes active only after the registration fee is verified.`
+      };
+      memory.invoices = [newInvoice, ...memory.invoices];
+      setToStorage(STORAGE_KEYS.INVOICES, memory.invoices);
+    }
+
     notifySubscribers();
 
     apiFetch('/api/properties', {
       method: 'POST',
-      body: JSON.stringify(newProp)
+      body: JSON.stringify({
+        ...newProp,
+        invoiceNumber,
+        paymentReference: paymentRef,
+        invoiceId
+      })
     }).catch(e => console.error('Failed saving property to D1:', e));
 
     logAudit(actor, 'ADD_PROPERTY', 'Property', newProp.id, `Registered property: ${newProp.name} (${propertyId})`);
@@ -2249,6 +2362,39 @@ export const storageService = {
 
     memory.properties = memory.properties.map(p => p.id === property.id ? updatedProperty : p);
     setToStorage(STORAGE_KEYS.PROPERTIES, memory.properties);
+
+    // Settle linked registration invoice and issue durable receipt
+    const linkedInvoice = memory.invoices.find(inv => 
+      (inv.serviceRef === property.id || inv.propertyId === property.id || inv.serviceRef === property.propertyId) &&
+      inv.serviceType === 'PROPERTY' && inv.paymentStatus !== 'PAYMENT_VERIFIED'
+    );
+    if (linkedInvoice) {
+      const receiptNumber = getNextNumber('receipt', 'REC');
+      memory.invoices = memory.invoices.map(inv =>
+        inv.id === linkedInvoice.id ? { ...inv, paymentStatus: 'PAYMENT_VERIFIED' as const } : inv
+      );
+      setToStorage(STORAGE_KEYS.INVOICES, memory.invoices);
+
+      const existingReceipt = memory.receipts.find(r => r.invoiceNumber === linkedInvoice.invoiceNumber || r.paymentReference === linkedInvoice.paymentReference);
+      if (!existingReceipt) {
+        const newRec: Receipt = {
+          id: `rec-${Date.now()}`,
+          receiptNumber,
+          paymentReference: linkedInvoice.paymentReference,
+          invoiceNumber: linkedInvoice.invoiceNumber,
+          clientName: linkedInvoice.clientName,
+          amount: linkedInvoice.totalAmount,
+          paymentMethod: 'Bank Transfer',
+          issuedDate: new Date().toISOString(),
+          issuedById: actor.id,
+          issuedByName: actor.name,
+          createdAt: new Date().toISOString()
+        };
+        memory.receipts = [newRec, ...memory.receipts];
+        setToStorage(STORAGE_KEYS.RECEIPTS, memory.receipts);
+      }
+    }
+
     notifySubscribers();
 
     apiFetch(`/api/properties/${property.id}`, {

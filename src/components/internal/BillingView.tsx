@@ -18,7 +18,7 @@ import {
 import { storageService, subscribeToStore } from '../../services/storage';
 import { useAuth } from '../../context/AuthContext';
 import { useBranchScope } from '../../utils/branchScope';
-import { Invoice, InvoiceItem, PaymentRecord, ExpenseRecord, Client } from '../../types';
+import { Invoice, InvoiceItem, PaymentRecord, ExpenseRecord, Client, Receipt } from '../../types';
 import { PrintDocumentModal, PrintableDocumentType } from '../common/PrintDocument';
 import { BranchGeneralReportModal } from './BranchGeneralReportModal';
 
@@ -26,10 +26,11 @@ export const BillingView: React.FC = () => {
   const { currentUser, canVerifyPayments, isAccountOfficer, isPrincipalPartner, isHeadOfChamber } = useAuth();
   const { filterByBranch, currentBranchName, getCreationBranchId } = useBranchScope();
   const canEditInvoices = isPrincipalPartner || isHeadOfChamber;
-  const [activeTab, setActiveTab] = useState<'invoices' | 'payments' | 'expenses'>('invoices');
+  const [activeTab, setActiveTab] = useState<'invoices' | 'payments' | 'receipts' | 'expenses'>('invoices');
 
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
+  const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [expenses, setExpenses] = useState<ExpenseRecord[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -71,6 +72,7 @@ export const BillingView: React.FC = () => {
   const loadData = () => {
     setInvoices(filterByBranch(storageService.getInvoices()));
     setPayments(filterByBranch(storageService.getPayments()));
+    setReceipts(storageService.getReceipts());
     setExpenses(filterByBranch(storageService.getExpenses()));
     setClients(filterByBranch(storageService.getClients()));
   };
@@ -141,10 +143,10 @@ export const BillingView: React.FC = () => {
     setEditForm({ ...editForm, items, subtotal, totalAmount: subtotal + editForm.taxAmount });
   };
 
-  const handleSaveInvoice = (e: React.FormEvent) => {
+  const handleSaveInvoice = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editForm || !currentUser || !editingInvoice) return;
-    const result = storageService.updateInvoice(editForm, currentUser);
+    const result = await storageService.updateInvoice(editForm, currentUser);
     if (result.success) {
       setEditingInvoice(null);
       setEditForm(null);
@@ -153,6 +155,11 @@ export const BillingView: React.FC = () => {
 
   const handleVerifyPayment = async (isApproved: boolean) => {
     if (!selectedPaymentToVerify || !currentUser || isVerifying) return;
+
+    if (!isApproved && !verificationNotes.trim()) {
+      setVerifyError('A rejection reason is required so the client receives explanation on how to correct their submission.');
+      return;
+    }
 
     setIsVerifying(true);
     setVerifyError(null);
@@ -205,6 +212,13 @@ export const BillingView: React.FC = () => {
     p.invoiceNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
     p.paymentReference.toLowerCase().includes(searchQuery.toLowerCase()) ||
     p.clientName.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const filteredReceipts = receipts.filter(r =>
+    r.receiptNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    r.invoiceNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    r.paymentReference.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    r.clientName.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   // Financial summary
@@ -305,6 +319,15 @@ export const BillingView: React.FC = () => {
         >
           <CreditCard className="w-4 h-4" />
           <span>Payment Submissions & Verification ({payments.length})</span>
+        </button>
+        <button
+          onClick={() => setActiveTab('receipts')}
+          className={`py-2 px-4 text-xs font-bold border-b-2 transition-colors flex items-center space-x-1.5 ${
+            activeTab === 'receipts' ? 'border-amber-600 text-amber-900' : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <ShieldCheck className="w-4 h-4 text-emerald-600" />
+          <span>Official Receipts ({receipts.length})</span>
         </button>
         <button
           onClick={() => setActiveTab('expenses')}
@@ -472,6 +495,78 @@ export const BillingView: React.FC = () => {
         </div>
       )}
 
+      {/* Official Receipts Docket */}
+      {activeTab === 'receipts' && (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-100 text-slate-700 font-bold uppercase border-b border-slate-200">
+                <tr>
+                  <th className="p-3.5">Receipt No</th>
+                  <th className="p-3.5">Invoice No</th>
+                  <th className="p-3.5">Payment Ref</th>
+                  <th className="p-3.5">Client Name</th>
+                  <th className="p-3.5">Amount (₦)</th>
+                  <th className="p-3.5">Method</th>
+                  <th className="p-3.5">Date Issued</th>
+                  <th className="p-3.5">Issued By</th>
+                  <th className="p-3.5 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {filteredReceipts.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} className="p-8 text-center text-slate-400">
+                      No official receipts recorded.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredReceipts.map(r => {
+                    const linkedInvoice = invoices.find(inv => inv.invoiceNumber === r.invoiceNumber);
+                    const matchingPayment = payments.find(p => p.receiptNumber === r.receiptNumber || p.paymentReference === r.paymentReference) || {
+                      id: r.id,
+                      paymentReference: r.paymentReference,
+                      invoiceNumber: r.invoiceNumber,
+                      clientName: r.clientName,
+                      amount: r.amount,
+                      paymentMethod: r.paymentMethod,
+                      paymentDate: r.issuedDate,
+                      status: 'PAYMENT_VERIFIED' as const,
+                      receiptNumber: r.receiptNumber,
+                      verifiedByName: r.issuedByName,
+                      verificationDate: r.issuedDate
+                    };
+                    return (
+                      <tr key={r.id} className="hover:bg-slate-50 transition-colors">
+                        <td className="p-3.5 font-mono font-bold text-emerald-800">{r.receiptNumber}</td>
+                        <td className="p-3.5 font-mono text-slate-700">{r.invoiceNumber}</td>
+                        <td className="p-3.5 font-mono text-amber-900 font-medium">{r.paymentReference}</td>
+                        <td className="p-3.5 font-semibold text-slate-900">{r.clientName}</td>
+                        <td className="p-3.5 font-mono font-bold text-slate-900">
+                          ₦{r.amount.toLocaleString('en-NG', { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="p-3.5 text-slate-600">{r.paymentMethod}</td>
+                        <td className="p-3.5 text-slate-600 font-mono">{r.issuedDate ? new Date(r.issuedDate).toLocaleDateString() : 'N/A'}</td>
+                        <td className="p-3.5 text-slate-500">{r.issuedByName || 'Accounts'}</td>
+                        <td className="p-3.5 text-right">
+                          <button
+                            onClick={() => setPrintDoc({ type: 'RECEIPT', data: matchingPayment as any, invoice: linkedInvoice })}
+                            className="px-2.5 py-1 text-xs text-emerald-700 hover:bg-emerald-50 border border-emerald-300 font-semibold rounded inline-flex items-center space-x-1"
+                          >
+                            <Printer className="w-3.5 h-3.5" />
+                            <span>Print Receipt</span>
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* Expenses Table */}
       {activeTab === 'expenses' && (
         <div className="space-y-4">
@@ -547,6 +642,38 @@ export const BillingView: React.FC = () => {
               <p><span className="text-slate-500">Reference:</span> <strong className="font-mono text-amber-900">{selectedPaymentToVerify.paymentReference}</strong></p>
               <p><span className="text-slate-500">Amount:</span> <strong className="font-mono text-base text-slate-900">₦{selectedPaymentToVerify.amount.toLocaleString()}</strong></p>
               <p><span className="text-slate-500">Bank TXN ID:</span> <span className="font-mono text-slate-700">{selectedPaymentToVerify.bankTransactionRef || 'N/A'}</span></p>
+              {selectedPaymentToVerify.proofDocumentUrl && (
+                <div className="pt-2 border-t border-slate-200">
+                  <span className="text-slate-500 font-bold block mb-1">Attached Payment Proof:</span>
+                  {selectedPaymentToVerify.proofDocumentUrl.startsWith('data:image') || selectedPaymentToVerify.proofDocumentUrl.startsWith('http') ? (
+                    <div className="space-y-1">
+                      <img 
+                        src={selectedPaymentToVerify.proofDocumentUrl} 
+                        alt="Payment Proof" 
+                        className="max-h-44 w-full object-contain rounded border border-slate-300 bg-white"
+                      />
+                      <a 
+                        href={selectedPaymentToVerify.proofDocumentUrl} 
+                        target="_blank" 
+                        rel="noreferrer" 
+                        className="text-[11px] text-amber-700 hover:underline block text-center font-medium"
+                      >
+                        Open image in new tab
+                      </a>
+                    </div>
+                  ) : (
+                    <a 
+                      href={selectedPaymentToVerify.proofDocumentUrl} 
+                      target="_blank" 
+                      rel="noreferrer" 
+                      className="inline-flex items-center space-x-1 text-xs text-amber-700 font-medium hover:underline bg-white p-2 rounded border border-slate-300"
+                    >
+                      <FileText className="w-4 h-4" />
+                      <span>View Uploaded Proof Document</span>
+                    </a>
+                  )}
+                </div>
+              )}
             </div>
 
             <div>

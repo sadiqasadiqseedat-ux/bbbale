@@ -1447,7 +1447,43 @@ export const LandlordPropertyPortalPage: React.FC<LandlordPropertyPortalPageProp
                           </div>
 
                           {!isAvailable && (
-                            <div className="pt-2">
+                            <div className="pt-2 space-y-2">
+                              {(() => {
+                                const linkedInvoice = storageService.getInvoices().find(inv =>
+                                  (inv.serviceRef === p.id || inv.propertyId === p.id || inv.serviceRef === p.propertyId) &&
+                                  inv.serviceType === 'PROPERTY'
+                                );
+                                if (!linkedInvoice) return null;
+                                return (
+                                  <div className="text-[11px] bg-slate-50 p-2.5 rounded border border-slate-200 space-y-1">
+                                    <div className="flex justify-between items-center text-slate-600">
+                                      <span>Invoice: <strong className="font-mono text-slate-800">{linkedInvoice.invoiceNumber}</strong></span>
+                                      <span>Payment Ref: <strong className="font-mono text-amber-900">{linkedInvoice.paymentReference}</strong></span>
+                                    </div>
+                                    <div className="flex justify-between items-center pt-1 border-t border-slate-200/60">
+                                      <span className="text-slate-500">
+                                        Status: <strong className="text-amber-800">{linkedInvoice.paymentStatus.replace('_', ' ')}</strong>
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setSubmissionResult({
+                                            landlord: lookupResult.landlord!,
+                                            property: p,
+                                            invoice: linkedInvoice,
+                                            paymentRef: linkedInvoice.paymentReference
+                                          });
+                                          setPaymentSubmitted(linkedInvoice.paymentStatus === 'PAYMENT_SUBMITTED');
+                                          setShowPaymentForm(linkedInvoice.paymentStatus !== 'PAYMENT_SUBMITTED');
+                                        }}
+                                        className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded text-[10px] font-bold shadow-2xs"
+                                      >
+                                        {linkedInvoice.paymentStatus === 'PAYMENT_SUBMITTED' ? 'View Payment Details' : 'Submit Payment Proof'}
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              })()}
                               <p className="text-[11px] text-amber-800 bg-amber-50 p-2 rounded border border-amber-200">
                                 <strong>Unavailable for allocation:</strong> Registration fee verification is pending. The property will become active as soon as fee payment is confirmed.
                               </p>

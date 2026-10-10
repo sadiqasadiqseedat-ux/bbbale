@@ -45,10 +45,10 @@ export const PAYMENT_VERIFIER_ROLES: UserRole[] = ['ACCOUNT_OFFICER', 'ADMINISTR
 export const PAYMENT_CORRECTION_ROLES: UserRole[] = ['PRINCIPAL_PARTNER'];
 
 // Roles that can manage billing/invoices
-const BILLING_ROLES: UserRole[] = ['PRINCIPAL_PARTNER', 'HEAD_OF_CHAMBER', 'ACCOUNT_OFFICER'];
+export const BILLING_ROLES: UserRole[] = ['PRINCIPAL_PARTNER', 'HEAD_OF_CHAMBER', 'ACCOUNT_OFFICER'];
 
 // All authenticated personnel roles
-const ALL_PERSONNEL_ROLES: UserRole[] = [
+export const ALL_PERSONNEL_ROLES: UserRole[] = [
   'PRINCIPAL_PARTNER',
   'HEAD_OF_CHAMBER',
   'ADMINISTRATOR_SECRETARY',

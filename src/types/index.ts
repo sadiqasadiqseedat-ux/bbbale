@@ -547,6 +547,20 @@ export interface PaymentRecord {
   submittedAt: string;
 }
 
+export interface Receipt {
+  id: string;
+  receiptNumber: string;
+  paymentReference: string;
+  invoiceNumber: string;
+  clientName: string;
+  amount: number;
+  paymentMethod: string;
+  issuedDate: string;
+  issuedById: string;
+  issuedByName: string;
+  createdAt?: string;
+}
+
 export interface ExpenseRecord {
   id: string;
   branchId?: string;

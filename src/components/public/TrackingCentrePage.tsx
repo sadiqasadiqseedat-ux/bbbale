@@ -208,20 +208,31 @@ export const TrackingCentrePage: React.FC = () => {
     else if (activeTab === 'payment') {
       const invoices = storageService.getInvoices();
       const payments = storageService.getPayments();
-      const matchInvoice = invoices.find(inv => 
+      const receipts = storageService.getReceipts();
+      let matchInvoice = invoices.find(inv => 
         inv.invoiceNumber.toLowerCase() === c.toLowerCase() || 
         inv.paymentReference.toLowerCase() === c.toLowerCase()
       );
 
+      if (!matchInvoice) {
+        // Also check if entered reference is a Receipt Number
+        const matchReceipt = receipts.find(r => r.receiptNumber.toLowerCase() === c.toLowerCase());
+        const matchPay = payments.find(p => p.receiptNumber?.toLowerCase() === c.toLowerCase() || p.paymentReference.toLowerCase() === c.toLowerCase());
+        const invNum = matchReceipt?.invoiceNumber || matchPay?.invoiceNumber;
+        if (invNum) {
+          matchInvoice = invoices.find(inv => inv.invoiceNumber.toLowerCase() === invNum.toLowerCase());
+        }
+      }
+
       if (matchInvoice) {
         if (matchInvoice.clientEmail.toLowerCase() === v || matchInvoice.clientPhone.includes(v)) {
-          const payment = payments.find(p => p.invoiceNumber === matchInvoice.invoiceNumber || p.paymentReference === matchInvoice.paymentReference);
+          const payment = payments.find(p => p.invoiceNumber === matchInvoice!.invoiceNumber || p.paymentReference === matchInvoice!.paymentReference);
           setTrackedRecord({ type: 'payment', data: matchInvoice, payment });
         } else {
           setErrorMsg('Security Verification Failed: Invoice phone or email verification failed.');
         }
       } else {
-        setErrorMsg('Invoice Number or Payment Reference Code not found.');
+        setErrorMsg('Invoice Number, Payment Reference, or Receipt Code not found.');
       }
     }
   };
@@ -697,6 +708,25 @@ export const TrackingCentrePage: React.FC = () => {
                   >
                     View Official Receipt
                   </button>
+                </div>
+              )}
+
+              {/* Rejection Alert: Shown when a prior submission was rejected */}
+              {trackedRecord.payment?.status === 'REJECTED' && (
+                <div className="p-4 bg-rose-50 border border-rose-200 rounded-lg text-xs space-y-1.5 text-rose-950">
+                  <div className="flex items-center space-x-2 font-bold text-rose-800">
+                    <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                    <span>Prior Payment Submission Rejected</span>
+                  </div>
+                  <p className="text-slate-700">
+                    The Chambers Account Officer reviewed your payment submission and recorded the following audit finding:
+                  </p>
+                  <p className="font-mono text-xs font-semibold text-rose-950 bg-white p-2.5 rounded border border-rose-200">
+                    "{trackedRecord.payment.verificationNotes || 'Payment transaction reference could not be reconciled with bank statements.'}"
+                  </p>
+                  <p className="text-slate-600 text-[11px] pt-1">
+                    Please review the audit reason above, verify your transaction particulars, and submit corrected payment proof below for re-verification.
+                  </p>
                 </div>
               )}
 
