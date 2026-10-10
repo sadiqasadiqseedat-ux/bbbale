@@ -2059,7 +2059,8 @@ export const storageService = {
     let paymentRef: string | undefined;
     let invoiceId: string | undefined;
 
-    if (newProp.registrationPaymentStatus === 'PENDING_PAYMENT' && newProp.registrationFee > 0) {
+    const registrationFee = newProp.registrationFee ?? 50000;
+    if (newProp.registrationPaymentStatus === 'PENDING_PAYMENT' && registrationFee > 0) {
       invoiceNumber = getNextNumber('invoice', 'INV');
       paymentRef = getNextNumber('payment', 'PAY');
       invoiceId = `inv-${Date.now()}`;
@@ -2078,11 +2079,11 @@ export const storageService = {
         landlordId: newProp.landlordId,
         items: [{
           description: `Property Registration & Documentation Fee — ${newProp.name} (${newProp.propertyId})`,
-          amount: newProp.registrationFee
+          amount: registrationFee
         }],
-        subtotal: newProp.registrationFee,
+        subtotal: registrationFee,
         taxAmount: 0,
-        totalAmount: newProp.registrationFee,
+        totalAmount: registrationFee,
         date: new Date().toISOString().split('T')[0],
         dueDate: new Date(Date.now() + 86400000 * 7).toISOString().split('T')[0],
         paymentStatus: 'UNPAID',

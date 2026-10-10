@@ -292,6 +292,7 @@ export const ConsultationsView: React.FC = () => {
               <p className="text-xs text-slate-800 bg-white p-3 border border-slate-200 rounded leading-relaxed">
                 {selectedConsultation.briefEnquiry}
               </p>
+            </div>
             {/* Financial Fee & Verification Docket */}
             {(() => {
               const invoices = storageService.getInvoices();
