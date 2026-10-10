@@ -1475,9 +1475,12 @@ export const storageService = {
         body: JSON.stringify({ ...data, branchId: resolvedBranchId })
       });
       serverPaymentId = res.paymentId;
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed submitting payment to D1:', err);
-      throw new Error('Failed to submit payment. Please try again.');
+      // Propagate the server's authoritative reason (amount mismatch, unknown
+      // invoice, oversized proof) instead of masking it, so the portal can show
+      // the client exactly why the submission was rejected.
+      throw new Error(err?.message || 'Failed to submit payment. Please try again.');
     }
 
     const newPayment: PaymentRecord = {

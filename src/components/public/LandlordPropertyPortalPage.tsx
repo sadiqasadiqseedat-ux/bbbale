@@ -338,30 +338,36 @@ export const LandlordPropertyPortalPage: React.FC<LandlordPropertyPortalPageProp
   };
 
   // Submit Payment Proof for Newly Registered Property
-  const handlePaymentSubmit = (e: React.FormEvent) => {
+  const handlePaymentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!submissionResult) return;
     if (!paymentTxnRef.trim()) {
-      alert('Please enter your bank transfer transaction reference.');
+      setPaymentError('Please enter your bank transfer transaction reference.');
       return;
     }
 
+    setPaymentError(null);
     setPaymentSubmitting(true);
-    storageService.submitPayment({
-      paymentReference: submissionResult.paymentRef,
-      invoiceNumber: submissionResult.invoice.invoiceNumber,
-      clientName: submissionResult.landlord.fullName,
-      amount: submissionResult.invoice.totalAmount,
-      branchId: submissionResult.property.branchId || 'br-abuja-01',
-      paymentMethod: 'Bank Transfer',
-      bankTransactionRef: paymentTxnRef.trim(),
-      proofDocumentUrl: paymentProofDataUrl || undefined,
-      notes: `Registration fee payment submitted for ${submissionResult.property.name} (${submissionResult.property.propertyId})`
-    });
-
-    setPaymentSubmitting(false);
-    setPaymentSubmitted(true);
-    setShowPaymentForm(false);
+    try {
+      // Await the authoritative server decision before showing success.
+      await storageService.submitPayment({
+        paymentReference: submissionResult.paymentRef,
+        invoiceNumber: submissionResult.invoice.invoiceNumber,
+        clientName: submissionResult.landlord.fullName,
+        amount: submissionResult.invoice.totalAmount,
+        branchId: submissionResult.property.branchId || 'br-abuja-01',
+        paymentMethod: 'Bank Transfer',
+        bankTransactionRef: paymentTxnRef.trim(),
+        proofDocumentUrl: paymentProofDataUrl || undefined,
+        notes: `Registration fee payment submitted for ${submissionResult.property.name} (${submissionResult.property.propertyId})`
+      });
+      setPaymentSubmitted(true);
+      setShowPaymentForm(false);
+    } catch (err: any) {
+      setPaymentError(err?.message || 'Failed to submit payment proof. Please try again.');
+    } finally {
+      setPaymentSubmitting(false);
+    }
   };
 
   // Completed Confirmation Screen
@@ -582,6 +588,12 @@ export const LandlordPropertyPortalPage: React.FC<LandlordPropertyPortalPageProp
                   />
                 </div>
               </div>
+              {paymentError && (
+                <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-lg text-xs flex items-center space-x-2">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>{paymentError}</span>
+                </div>
+              )}
               <div className="flex justify-end space-x-3 pt-2">
                 <button
                   type="button"
