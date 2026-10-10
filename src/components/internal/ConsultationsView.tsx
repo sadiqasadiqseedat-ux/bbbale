@@ -36,6 +36,8 @@ export const ConsultationsView: React.FC = () => {
   const [privilegedNotes, setPrivilegedNotes] = useState('');
   const [feedbackNotice, setFeedbackNotice] = useState<string | null>(null);
 
+  const [statusError, setStatusError] = useState<string | null>(null);
+
   const loadData = () => {
     const all = storageService.getConsultations();
     setConsultations(filterByBranch(all));
@@ -47,14 +49,34 @@ export const ConsultationsView: React.FC = () => {
     return () => unsub();
   }, [currentUser?.branchId]);
 
-  const handleUpdateStatus = (newStatus: Consultation['status'], clientNote: string) => {
+  const handleUpdateStatus = async (newStatus: Consultation['status'], clientNote: string) => {
     if (!selectedConsultation || !currentUser) return;
+    setStatusError(null);
+
+    if (newStatus === 'Consultation Confirmed' || newStatus === 'Payment Verified') {
+      const invoices = storageService.getInvoices();
+      const invoice = invoices.find(inv => 
+        inv.invoiceNumber === selectedConsultation.invoiceNumber || 
+        inv.paymentReference === selectedConsultation.paymentReference
+      );
+      const isVerified = invoice?.paymentStatus === 'PAYMENT_VERIFIED';
+      const isAuthorized = currentUser.role === 'PRINCIPAL_PARTNER' || currentUser.role === 'HEAD_OF_CHAMBER' || currentUser.role === 'ACCOUNT_OFFICER';
+      if (!isVerified && !isAuthorized) {
+        setStatusError('Cannot confirm consultation: The consultation fee payment has not been verified by the Account Officer.');
+        return;
+      }
+    }
+
     const updated: Consultation = {
       ...selectedConsultation,
       status: newStatus,
       clientVisibleUpdate: clientNote
     };
-    storageService.updateConsultation(updated, currentUser);
+    const res = await storageService.updateConsultation(updated, currentUser);
+    if (res && !res.success) {
+      setStatusError(res.error || 'Failed to update consultation.');
+      return;
+    }
     setSelectedConsultation(updated);
   };
 
@@ -271,6 +293,57 @@ export const ConsultationsView: React.FC = () => {
                 {selectedConsultation.briefEnquiry}
               </p>
             </div>
+            {/* Financial Fee & Verification Docket */}
+            {(() => {
+              const invoices = storageService.getInvoices();
+              const invoice = invoices.find(inv => 
+                inv.invoiceNumber === selectedConsultation.invoiceNumber || 
+                inv.paymentReference === selectedConsultation.paymentReference
+              );
+              const receipts = storageService.getReceipts();
+              const receipt = receipts.find(r => 
+                r.invoiceNumber === selectedConsultation.invoiceNumber || 
+                r.paymentReference === selectedConsultation.paymentReference
+              );
+              return (
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs space-y-1.5">
+                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                    Financial Fee Docket & Payment Verification:
+                  </span>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <p><span className="text-slate-500">Invoice:</span> <strong className="font-mono text-slate-900">{selectedConsultation.invoiceNumber}</strong></p>
+                      <p><span className="text-slate-500">Payment Ref:</span> <strong className="font-mono text-amber-900">{selectedConsultation.paymentReference}</strong></p>
+                    </div>
+                    <div>
+                      <p>
+                        <span className="text-slate-500">Payment Status: </span>
+                        <span className={`font-bold px-2 py-0.5 rounded text-[10px] ${
+                          invoice?.paymentStatus === 'PAYMENT_VERIFIED' ? 'bg-emerald-100 text-emerald-800' :
+                          invoice?.paymentStatus === 'PAYMENT_SUBMITTED' ? 'bg-amber-100 text-amber-800' :
+                          'bg-red-100 text-red-800'
+                        }`}>
+                          {invoice?.paymentStatus?.replace('_', ' ') || 'UNPAID'}
+                        </span>
+                      </p>
+                      {receipt && (
+                        <p className="mt-1">
+                          <span className="text-slate-500">Receipt Issued: </span>
+                          <strong className="font-mono text-emerald-800">{receipt.receiptNumber}</strong>
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {statusError && (
+              <div className="p-3 bg-red-50 border border-red-200 text-red-800 rounded-lg text-xs flex items-center space-x-2">
+                <AlertCircle className="w-4 h-4 shrink-0 text-red-600" />
+                <span>{statusError}</span>
+              </div>
+            )}
 
             {/* Client Visible Update Box */}
             <div className="p-4 bg-amber-50/60 border border-amber-200 rounded-lg text-xs space-y-2">

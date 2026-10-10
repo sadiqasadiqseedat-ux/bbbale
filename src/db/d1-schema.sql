@@ -254,7 +254,7 @@ CREATE TABLE IF NOT EXISTS properties (
   district TEXT NOT NULL,
   landlord_id TEXT NOT NULL,
   image_url TEXT,
-  registration_payment_status TEXT NOT NULL DEFAULT 'PAID_CONFIRMED',
+  registration_payment_status TEXT NOT NULL DEFAULT 'PENDING_PAYMENT',
   registration_fee REAL DEFAULT 50000,
   total_units INTEGER NOT NULL DEFAULT 1,
   title_information TEXT NOT NULL DEFAULT '',

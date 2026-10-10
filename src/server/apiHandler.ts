@@ -24,7 +24,8 @@ import {
   DocumentRecord, 
   WebsiteContent, 
   AuditLog, 
-  Branch 
+  Branch,
+  Receipt 
 } from '../types';
 import { hashPassword, verifyPassword, generateSalt, generateSecureToken, validatePasswordStrength, needsHashUpgrade } from '../services/crypto';
 import {
@@ -687,6 +688,8 @@ export async function handleApiRequest(
         ? await db.prepare('SELECT * FROM payments WHERE branch_id = ? ORDER BY submitted_at DESC').bind(branchFilter).all<any>()
         : await db.prepare('SELECT * FROM payments ORDER BY submitted_at DESC').all<any>();
 
+      const receipts = await db.prepare('SELECT * FROM receipts ORDER BY issued_date DESC').all<any>().catch(() => ({ results: [] }));
+
       const expenses = branchFilter
         ? await db.prepare('SELECT * FROM expenses WHERE branch_id = ? ORDER BY created_at DESC').bind(branchFilter).all<any>().catch(() => ({ results: [] }))
         : await db.prepare('SELECT * FROM expenses ORDER BY created_at DESC').all<any>().catch(() => ({ results: [] }));
@@ -969,6 +972,19 @@ export async function handleApiRequest(
             verificationNotes: p.verification_notes,
             proofDocumentUrl: p.proof_document_url,
             submittedAt: p.submitted_at
+          })),
+          receipts: (receipts.results || []).map((r: any) => ({
+            id: r.id,
+            receiptNumber: r.receipt_number,
+            paymentReference: r.payment_reference,
+            invoiceNumber: r.invoice_number,
+            clientName: r.client_name,
+            amount: Number(r.amount),
+            paymentMethod: r.payment_method,
+            issuedDate: r.issued_date,
+            issuedById: r.issued_by_id,
+            issuedByName: r.issued_by_name,
+            createdAt: r.created_at
           })),
           expenses: expenses.results || [],
           students: (students.results || []).map(s => ({
@@ -1662,6 +1678,12 @@ export async function handleApiRequest(
       if (requestedStatus === PAYMENT_STATUS_VERIFIED && existing.payment_status !== PAYMENT_STATUS_VERIFIED) {
         return errorResponse('An invoice can only be marked PAID through the authorized payment verification process.', 403);
       }
+      if (requestedStatus === PAYMENT_STATUS_SUBMITTED && existing.payment_status !== PAYMENT_STATUS_SUBMITTED) {
+        return errorResponse('Invoice payment submission status cannot be altered through ordinary editing.', 400);
+      }
+      if (existing.payment_status === PAYMENT_STATUS_SUBMITTED && body.totalAmount !== undefined && Number(body.totalAmount) !== Number(existing.total_amount)) {
+        return errorResponse('The total of an invoice awaiting payment verification cannot be changed.', 409);
+      }
       if (existing.payment_status === PAYMENT_STATUS_VERIFIED) {
         if (requestedStatus && requestedStatus !== PAYMENT_STATUS_VERIFIED) {
           return errorResponse('A verified invoice cannot be reopened by ordinary editing. An authorized adjustment is required.', 409);
@@ -1916,7 +1938,7 @@ export async function handleApiRequest(
 
         // Activate ONLY the explicitly linked service.
         const serviceType = payment.service_type || invoice?.service_type;
-        const serviceRef = payment.service_ref || invoice?.service_ref;
+        const serviceRef = payment.service_ref || invoice?.service_ref || (serviceType === 'PROPERTY' ? invoice?.property_id : undefined);
         if (serviceType === 'CONSULTATION') {
           const where = serviceRef ? 'id = ?' : 'invoice_number = ?';
           await db.prepare(
@@ -1926,8 +1948,8 @@ export async function handleApiRequest(
           ).bind(`Payment verified by Accounts. Receipt ${finalReceiptNumber} issued. Your consultation schedule is confirmed.`, serviceRef || payment.invoice_number).run();
         } else if (serviceType === 'PROPERTY' && serviceRef) {
           await db.prepare(
-            `UPDATE properties SET registration_payment_status = ?, legal_status = 'Managed by Chambers' WHERE id = ?`
-          ).bind(PROPERTY_PAYMENT_CONFIRMED, serviceRef).run();
+            `UPDATE properties SET registration_payment_status = ?, legal_status = 'Managed by Chambers' WHERE id = ? OR property_id = ?`
+          ).bind(PROPERTY_PAYMENT_CONFIRMED, serviceRef, serviceRef).run();
         }
 
         await logAudit(
@@ -1954,7 +1976,7 @@ export async function handleApiRequest(
       ).bind(INVOICE_STATUS_UNPAID, payment.invoice_number, PAYMENT_STATUS_VERIFIED).run();
 
       const serviceType = payment.service_type || invoice?.service_type;
-      const serviceRef = payment.service_ref || invoice?.service_ref;
+      const serviceRef = payment.service_ref || invoice?.service_ref || (serviceType === 'PROPERTY' ? invoice?.property_id : undefined);
       if (serviceType === 'CONSULTATION') {
         const where = serviceRef ? 'id = ?' : 'invoice_number = ?';
         await db.prepare(
@@ -1970,6 +1992,40 @@ export async function handleApiRequest(
       );
 
       return jsonResponse({ success: true, receiptNumber: null, status: PAYMENT_STATUS_REJECTED });
+    }
+
+    if (path === '/api/receipts' && request.method === 'GET') {
+      const auth = await getAuthUser(request, db);
+      if (!auth) {
+        return errorResponse('Unauthorized: Valid personnel login required.', 401);
+      }
+      const ref = url.searchParams.get('ref');
+      let query = 'SELECT * FROM receipts';
+      let params: any[] = [];
+      if (ref) {
+        query += ' WHERE receipt_number = ? OR payment_reference = ? OR invoice_number = ?';
+        params = [ref, ref, ref];
+      }
+      query += ' ORDER BY issued_date DESC LIMIT 200';
+      const rows = params.length > 0
+        ? await db.prepare(query).bind(...params).all<any>()
+        : await db.prepare(query).all<any>();
+      return jsonResponse({
+        success: true,
+        receipts: (rows.results || []).map((r: any) => ({
+          id: r.id,
+          receiptNumber: r.receipt_number,
+          paymentReference: r.payment_reference,
+          invoiceNumber: r.invoice_number,
+          clientName: r.client_name,
+          amount: Number(r.amount),
+          paymentMethod: r.payment_method,
+          issuedDate: r.issued_date,
+          issuedById: r.issued_by_id,
+          issuedByName: r.issued_by_name,
+          createdAt: r.created_at
+        }))
+      });
     }
 
     // --------------------------------------------------------------------------
@@ -2277,6 +2333,12 @@ export async function handleApiRequest(
         const propertyId = body.propertyId || await getNextNumber(db, 'property', 'PROP');
         const id = body.id || `prop-${Date.now()}`;
 
+        const regPaymentStatus = (body.registrationPaymentStatus === PROPERTY_PAYMENT_CONFIRMED && (canVerifyPayments(auth.user) || canManageBilling(auth.user)))
+          ? PROPERTY_PAYMENT_CONFIRMED
+          : PROPERTY_PAYMENT_PENDING;
+
+        const regFee = body.registrationFee !== undefined ? Number(body.registrationFee) : 50000;
+
         await db.prepare(
           `INSERT INTO properties 
            (id, property_id, branch_id, name, property_type, address, state, lga, district, landlord_id, total_units, title_information, survey_information, legal_status, assigned_lawyer_id, related_client_id, notes, image_url, registration_payment_status, registration_fee)
@@ -2287,16 +2349,36 @@ export async function handleApiRequest(
           body.totalUnits || 1, body.titleInformation || '', body.surveyInformation || '',
           body.legalStatus || 'Managed by Chambers', body.assignedLawyerId || 'usr-counsel-01',
           body.relatedClientId || null, body.notes || '', body.imageUrl || null,
-          // A missing payment status must never imply payment. Manual
-          // confirmation is only honoured for an authorized verifier/billing role.
-          (body.registrationPaymentStatus === PROPERTY_PAYMENT_CONFIRMED && (canVerifyPayments(auth.user) || canManageBilling(auth.user)))
-            ? PROPERTY_PAYMENT_CONFIRMED
-            : (body.registrationPaymentStatus === PROPERTY_PAYMENT_CONFIRMED ? PROPERTY_PAYMENT_PENDING : (body.registrationPaymentStatus || PROPERTY_PAYMENT_PENDING)),
-          body.registrationFee !== undefined ? Number(body.registrationFee) : 50000
+          regPaymentStatus, regFee
         ).run();
 
-        await logAudit(db, auth.user.id, auth.user.name, auth.user.role, 'ADD_PROPERTY', 'Property', id, `Registered property: ${body.name} (${propertyId})`);
-        return jsonResponse({ success: true, propertyId, id });
+        // If pending payment and fee applies, generate the registration invoice so it's tracked in billing
+        let invoiceNumber: string | null = null;
+        let paymentRef: string | null = null;
+        let invoiceId: string | null = null;
+        if (regPaymentStatus === PROPERTY_PAYMENT_PENDING && regFee > 0 && body.createInvoice !== false) {
+          const landlord = await db.prepare('SELECT * FROM landlords WHERE id = ? OR landlord_id = ?').bind(body.landlordId, body.landlordId).first<any>();
+          invoiceNumber = await getNextNumber(db, 'invoice', 'INV');
+          paymentRef = await getNextNumber(db, 'payment', 'PAY');
+          invoiceId = `inv-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+          const dueDate = new Date(Date.now() + 86400000 * 7).toISOString().split('T')[0];
+          await db.prepare(
+            `INSERT INTO invoices 
+             (id, invoice_number, client_name, client_email, client_phone, branch_id, purpose, service_type, service_ref, property_id, landlord_id, items, subtotal, tax_amount, total_amount, date, due_date, payment_status, payment_reference, notes)
+             VALUES (?, ?, ?, ?, ?, ?, 'ADDITIONAL_PROPERTY_REGISTRATION', 'PROPERTY', ?, ?, ?, ?, ?, 0, ?, ?, ?, 'UNPAID', ?, ?)`
+          ).bind(
+            invoiceId, invoiceNumber,
+            landlord ? `${landlord.full_name} (Landlord)` : `${body.name} (Landlord)`,
+            landlord?.email || '', landlord?.phone || '',
+            body.branchId || 'br-abuja-01', id, id, body.landlordId || null,
+            JSON.stringify([{ description: `Property Registration & Documentation Fee — ${body.name} (${propertyId})`, amount: regFee }]),
+            regFee, regFee, new Date().toISOString().split('T')[0], dueDate, paymentRef,
+            `Property ID: ${propertyId}. The property becomes active only after the registration fee is verified.`
+          ).run();
+        }
+
+        await logAudit(db, auth.user.id, auth.user.name, auth.user.role, 'ADD_PROPERTY', 'Property', id, `Registered property: ${body.name} (${propertyId}) [${regPaymentStatus}]`);
+        return jsonResponse({ success: true, propertyId, id, invoiceNumber, paymentRef, invoiceId });
       }
 
       if (request.method === 'PUT') {
@@ -2332,6 +2414,51 @@ export async function handleApiRequest(
           body.imageUrl ?? null, body.notes ?? null, body.totalUnits ?? null,
           id, id
         ).run();
+
+        // When property registration fee is confirmed by authorized officer, settle the linked invoice and issue receipt
+        if (body.registrationPaymentStatus === PROPERTY_PAYMENT_CONFIRMED && (canVerifyPayments(auth.user) || canManageBilling(auth.user))) {
+          const linkedInvoice = await db.prepare(
+            `SELECT * FROM invoices 
+             WHERE (service_ref = ? OR property_id = ? OR service_ref = (SELECT id FROM properties WHERE id = ? OR property_id = ? LIMIT 1))
+               AND service_type = 'PROPERTY' AND payment_status <> ? LIMIT 1`
+          ).bind(id, id, id, id, PAYMENT_STATUS_VERIFIED).first<any>();
+
+          if (linkedInvoice) {
+            await db.prepare('UPDATE invoices SET payment_status = ? WHERE id = ?').bind(PAYMENT_STATUS_VERIFIED, linkedInvoice.id).run();
+
+            const existingReceipt = await db.prepare('SELECT receipt_number FROM receipts WHERE payment_reference = ? OR invoice_number = ? LIMIT 1').bind(linkedInvoice.payment_reference, linkedInvoice.invoice_number).first<any>();
+            const receiptNumber = existingReceipt?.receipt_number || await getNextNumber(db, 'receipt', 'REC');
+
+            const payment = await db.prepare('SELECT * FROM payments WHERE invoice_number = ? LIMIT 1').bind(linkedInvoice.invoice_number).first<any>();
+            if (!payment) {
+              const payId = `pay-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+              await db.prepare(
+                `INSERT INTO payments 
+                 (id, payment_reference, invoice_number, invoice_id, service_type, service_ref, client_name, amount, branch_id, payment_method, payment_date, status, receipt_number, verified_by_id, verified_by_name, verification_date, verification_notes, submitted_at)
+                 VALUES (?, ?, ?, ?, 'PROPERTY', ?, ?, ?, ?, 'Bank Transfer', date('now'), ?, ?, ?, ?, datetime('now'), 'Manually confirmed and verified by Accounts Officer', datetime('now'))`
+              ).bind(
+                payId, linkedInvoice.payment_reference, linkedInvoice.invoice_number, linkedInvoice.id,
+                id, linkedInvoice.client_name, linkedInvoice.total_amount, linkedInvoice.branch_id || auth.user.branchId || 'br-abuja-01',
+                PAYMENT_STATUS_VERIFIED, receiptNumber, auth.user.id, auth.user.name
+              ).run();
+            } else if (payment.status !== PAYMENT_STATUS_VERIFIED) {
+              await db.prepare(
+                `UPDATE payments SET status = ?, receipt_number = ?, verified_by_id = ?, verified_by_name = ?, verification_date = datetime('now'), verification_notes = ? WHERE id = ?`
+              ).bind(PAYMENT_STATUS_VERIFIED, receiptNumber, auth.user.id, auth.user.name, 'Manually confirmed and verified by Accounts Officer', payment.id).run();
+            }
+
+            if (!existingReceipt) {
+              await db.prepare(
+                `INSERT OR IGNORE INTO receipts (id, receipt_number, payment_reference, invoice_number, client_name, amount, payment_method, issued_date, issued_by_id, issued_by_name)
+                 VALUES (?, ?, ?, ?, ?, ?, 'Bank Transfer', datetime('now'), ?, ?)`
+              ).bind(
+                `rec-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+                receiptNumber, linkedInvoice.payment_reference, linkedInvoice.invoice_number,
+                linkedInvoice.client_name, linkedInvoice.total_amount, auth.user.id, auth.user.name
+              ).run();
+            }
+          }
+        }
 
         return jsonResponse({ success: true, id });
       }
@@ -2887,6 +3014,66 @@ export async function handleApiRequest(
       }
     }
 
+    if ((path === '/api/consultations' || path.startsWith('/api/consultations/')) && (request.method === 'PUT' || request.method === 'PATCH')) {
+      const auth = await getAuthUser(request, db);
+      if (!auth) {
+        return errorResponse('Unauthorized: Valid personnel login required.', 401);
+      }
+      const targetId = path.startsWith('/api/consultations/') ? path.replace('/api/consultations/', '').trim() : '';
+      let body: any;
+      try {
+        body = await request.json();
+      } catch {
+        return errorResponse('Malformed request body.', 400);
+      }
+      const consId = targetId || body.id || body.code;
+      if (!consId) {
+        return errorResponse('Consultation ID or code is required.', 400);
+      }
+
+      const existing = await db.prepare(
+        'SELECT * FROM consultations WHERE id = ? OR code = ?'
+      ).bind(consId, consId).first<any>();
+      if (!existing) {
+        return errorResponse('Consultation not found.', 404);
+      }
+
+      // If user is trying to set status to 'Consultation Confirmed' or 'Payment Verified':
+      // The invoice/payment MUST have been verified, unless the actor has verifier permissions.
+      const requestedStatus = body.status;
+      if (requestedStatus === 'Payment Verified' || requestedStatus === 'Consultation Confirmed') {
+        const invoice = await db.prepare(
+          'SELECT payment_status FROM invoices WHERE invoice_number = ? OR payment_reference = ?'
+        ).bind(existing.invoice_number, existing.payment_reference).first<any>();
+
+        const isPaymentVerified = invoice?.payment_status === PAYMENT_STATUS_VERIFIED;
+        const canOverride = canVerifyPayments(auth.user);
+        if (!isPaymentVerified && !canOverride) {
+          return errorResponse('Cannot confirm consultation: The consultation fee payment has not been verified by the Account Officer.', 403);
+        }
+      }
+
+      await db.prepare(
+        `UPDATE consultations
+         SET status = COALESCE(?, status),
+             client_visible_update = COALESCE(?, client_visible_update),
+             assigned_lawyer_id = COALESCE(?, assigned_lawyer_id)
+         WHERE id = ?`
+      ).bind(
+        body.status ?? null,
+        body.clientVisibleUpdate ?? null,
+        body.assignedLawyerId ?? null,
+        existing.id
+      ).run();
+
+      await logAudit(
+        db, auth.user.id, auth.user.name, auth.user.role, 'UPDATE_CONSULTATION', 'Consultation', existing.id,
+        `Updated consultation ${existing.code} status to "${body.status || existing.status}"`
+      );
+
+      return jsonResponse({ success: true, id: existing.id, status: body.status || existing.status });
+    }
+
     // --------------------------------------------------------------------------
     // 10. PUBLIC TRACKING (SANITIZED & SAFE)
     // --------------------------------------------------------------------------
@@ -2898,7 +3085,7 @@ export async function handleApiRequest(
 
       // Check client ID
       const client = await db.prepare(
-        'SELECT client_id, full_name, branch_id, date_registered, conflict_check_status FROM clients WHERE client_id = ?'
+        'SELECT client_id, full_name, branch_id, date_registered, conflict_check_status FROM clients WHERE UPPER(TRIM(client_id)) = UPPER(?)'
       ).bind(code).first<any>();
       if (client) {
         return jsonResponse({
@@ -2918,7 +3105,7 @@ export async function handleApiRequest(
         `SELECT t.tracking_code, t.full_name, t.unit_number, t.status, p.name as property_name
          FROM tenants t
          LEFT JOIN properties p ON t.property_id = p.id
-         WHERE t.tracking_code = ?`
+         WHERE UPPER(TRIM(t.tracking_code)) = UPPER(?)`
       ).bind(code).first<any>();
       if (tenant) {
         return jsonResponse({
@@ -2936,23 +3123,62 @@ export async function handleApiRequest(
 
       // Check landlord tracking code
       const landlord = await db.prepare(
-        'SELECT tracking_code, full_name, landlord_id, date_registered FROM landlords WHERE tracking_code = ?'
-      ).bind(code).first<any>();
+        'SELECT id, tracking_code, full_name, landlord_id, date_registered FROM landlords WHERE UPPER(TRIM(tracking_code)) = UPPER(?) OR UPPER(TRIM(landlord_id)) = UPPER(?)'
+      ).bind(code, code).first<any>();
       if (landlord) {
+        const props = await db.prepare(
+          'SELECT property_id, name, registration_payment_status, legal_status FROM properties WHERE landlord_id = ?'
+        ).bind(landlord.id).all<any>();
+        const propertyList = props.results || [];
+        const hasPending = propertyList.some(p => p.registration_payment_status !== 'PAID_CONFIRMED');
         return jsonResponse({
           success: true,
           type: 'Estate / Landlord Portfolio',
           data: {
             reference: landlord.tracking_code,
             name: landlord.full_name,
-            status: 'Managed by Chambers'
+            status: propertyList.length === 0
+              ? 'Registered Landlord'
+              : hasPending
+              ? 'Registration Fee Awaiting Verification'
+              : 'Managed by Chambers',
+            properties: propertyList.map(p => ({
+              propertyId: p.property_id,
+              name: p.name,
+              registrationStatus: p.registration_payment_status,
+              status: p.registration_payment_status === 'PAID_CONFIRMED' ? 'Active & Managed' : 'Pending Fee Verification'
+            }))
+          }
+        });
+      }
+
+      // Check property ID directly
+      const property = await db.prepare(
+        `SELECT p.id, p.property_id, p.name, p.property_type, p.address, p.registration_payment_status, p.legal_status, l.full_name as landlord_name, l.tracking_code as landlord_code
+         FROM properties p
+         LEFT JOIN landlords l ON p.landlord_id = l.id
+         WHERE UPPER(TRIM(p.property_id)) = UPPER(?) OR UPPER(TRIM(p.id)) = UPPER(?)`
+      ).bind(code, code).first<any>();
+      if (property) {
+        return jsonResponse({
+          success: true,
+          type: 'Property Asset Portfolio',
+          data: {
+            reference: property.property_id,
+            name: property.name,
+            propertyType: property.property_type,
+            address: property.address,
+            landlord: property.landlord_name,
+            landlordCode: property.landlord_code,
+            registrationStatus: property.registration_payment_status,
+            status: property.registration_payment_status === 'PAID_CONFIRMED' ? 'Active & Managed by Chambers' : 'Pending Fee Payment & Verification'
           }
         });
       }
 
       // Check consultation code
       const consultation = await db.prepare(
-        'SELECT code, service_category, preferred_date, method, status, client_visible_update FROM consultations WHERE code = ?'
+        'SELECT code, service_category, preferred_date, method, status, client_visible_update FROM consultations WHERE UPPER(TRIM(code)) = UPPER(?)'
       ).bind(code).first<any>();
       if (consultation) {
         return jsonResponse({
@@ -2969,9 +3195,30 @@ export async function handleApiRequest(
         });
       }
 
+      // Check receipt number
+      const receipt = await db.prepare(
+        'SELECT receipt_number, payment_reference, invoice_number, client_name, amount, payment_method, issued_date FROM receipts WHERE UPPER(TRIM(receipt_number)) = UPPER(?)'
+      ).bind(code).first<any>();
+      if (receipt) {
+        return jsonResponse({
+          success: true,
+          type: 'Official Payment Receipt',
+          data: {
+            receiptNumber: receipt.receipt_number,
+            paymentReference: receipt.payment_reference,
+            invoiceNumber: receipt.invoice_number,
+            clientName: receipt.client_name,
+            amount: receipt.amount,
+            paymentMethod: receipt.payment_method,
+            issuedDate: receipt.issued_date,
+            status: 'VERIFIED & CLEARED'
+          }
+        });
+      }
+
       // Check invoice number or payment ref
       const invoice = await db.prepare(
-        'SELECT invoice_number, total_amount, payment_status, due_date FROM invoices WHERE invoice_number = ? OR payment_reference = ?'
+        'SELECT invoice_number, total_amount, payment_status, due_date FROM invoices WHERE UPPER(TRIM(invoice_number)) = UPPER(?) OR UPPER(TRIM(payment_reference)) = UPPER(?)'
       ).bind(code, code).first<any>();
       if (invoice) {
         return jsonResponse({

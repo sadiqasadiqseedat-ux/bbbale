@@ -120,27 +120,34 @@ export const PrintDocumentModal: React.FC<PrintDocumentProps> = ({ document, onC
 
       case 'RECEIPT': {
         const pay = document.data;
+        const isVerified = pay.status === 'PAYMENT_VERIFIED';
         return (
           <div className="space-y-6">
             <div className="border-b border-slate-200 pb-4 flex justify-between items-end">
               <div>
-                <span className="text-xs font-semibold tracking-wider text-emerald-700 uppercase">Payment Confirmation</span>
-                <h2 className="text-2xl font-serif font-bold text-slate-900">OFFICIAL RECEIPT</h2>
-                <p className="text-sm text-slate-500 font-mono">Receipt No: {pay.receiptNumber || 'PENDING VERIFICATION'}</p>
+                <span className={`text-xs font-semibold tracking-wider uppercase ${isVerified ? 'text-emerald-700' : 'text-amber-700'}`}>
+                  {isVerified ? 'Official Chambers Document' : 'Interim Submission Docket'}
+                </span>
+                <h2 className="text-2xl font-serif font-bold text-slate-900">
+                  {isVerified ? 'OFFICIAL RECEIPT' : 'SUBMISSION ACKNOWLEDGMENT'}
+                </h2>
+                <p className="text-sm text-slate-500 font-mono">
+                  {isVerified ? `Receipt No: ${pay.receiptNumber}` : 'Official Receipt: PENDING BANK AUDIT & VERIFICATION'}
+                </p>
               </div>
               <div className="text-right">
                 <p className="text-sm font-semibold text-slate-900">Payment Date: {new Date(pay.paymentDate).toLocaleDateString()}</p>
                 <span className={`inline-block mt-1 text-xs font-bold px-2.5 py-1 rounded ${
-                  pay.status === 'PAYMENT_VERIFIED' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                  isVerified ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
                 }`}>
-                  {pay.status === 'PAYMENT_VERIFIED' ? 'PAYMENT VERIFIED & CREDITED' : 'SUBMITTED / PENDING VERIFICATION'}
+                  {isVerified ? 'PAYMENT VERIFIED & CREDITED' : 'SUBMITTED / PENDING VERIFICATION'}
                 </span>
               </div>
             </div>
 
-            <div className="p-4 bg-emerald-50/50 rounded-lg border border-emerald-200 space-y-2">
+            <div className={`p-4 rounded-lg border space-y-2 ${isVerified ? 'bg-emerald-50/50 border-emerald-200' : 'bg-amber-50/50 border-amber-200'}`}>
               <div className="flex justify-between items-center text-sm">
-                <span className="text-slate-600">Received From:</span>
+                <span className="text-slate-600">Payer / Client:</span>
                 <span className="font-semibold text-slate-900">{pay.clientName}</span>
               </div>
               <div className="flex justify-between items-center text-sm">
@@ -161,24 +168,33 @@ export const PrintDocumentModal: React.FC<PrintDocumentProps> = ({ document, onC
                   <span className="font-mono text-slate-900">{pay.bankTransactionRef}</span>
                 </div>
               )}
-              {pay.verifiedByName && (
+              {isVerified && pay.verifiedByName && (
                 <div className="flex justify-between items-center text-xs text-slate-500 pt-2 border-t border-emerald-200">
                   <span>Verified by Accounts: {pay.verifiedByName}</span>
                   <span>Date: {pay.verificationDate ? new Date(pay.verificationDate).toLocaleDateString() : ''}</span>
+                </div>
+              )}
+              {!isVerified && (
+                <div className="pt-2 border-t border-amber-200 text-xs text-amber-900">
+                  <strong>Notice:</strong> This interim acknowledgment records that payment details were submitted to Chambers. It does not constitute proof of receipt of funds or settlement until cleared by the Account Officer.
                 </div>
               )}
             </div>
 
             <div className="p-6 bg-slate-900 text-white rounded-lg flex justify-between items-center">
               <div>
-                <p className="text-xs uppercase tracking-wider text-slate-400">Total Amount Received</p>
+                <p className="text-xs uppercase tracking-wider text-slate-400">
+                  {isVerified ? 'Total Amount Received & Cleared' : 'Amount Claimed / Submitted'}
+                </p>
                 <p className="text-2xl font-mono font-bold text-amber-400">
                   ₦{pay.amount.toLocaleString('en-NG', { minimumFractionDigits: 2 })}
                 </p>
               </div>
               <div className="text-right text-xs text-slate-300">
-                <p>Funds Verified for B. B. BALE & CO.</p>
-                <p className="text-amber-200 font-serif mt-1">Official Account Certification</p>
+                <p>{isVerified ? 'Funds Verified for B. B. BALE & CO.' : 'Awaiting Audit Clearance'}</p>
+                <p className="text-amber-200 font-serif mt-1">
+                  {isVerified ? 'Official Account Certification' : 'Interim Submission Record'}
+                </p>
               </div>
             </div>
           </div>

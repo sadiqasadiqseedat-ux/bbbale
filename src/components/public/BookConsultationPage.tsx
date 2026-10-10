@@ -73,10 +73,36 @@ export const BookConsultationPage: React.FC<BookConsultationPageProps> = ({ onNa
   const [showPrintModal, setShowPrintModal] = useState(false);
   const [showPaymentForm, setShowPaymentForm] = useState(false);
   const [paymentTxnRef, setPaymentTxnRef] = useState('');
+  const [paymentProofDataUrl, setPaymentProofDataUrl] = useState('');
+  const [paymentProofFileName, setPaymentProofFileName] = useState('');
   const [paymentSubmittedSuccess, setPaymentSubmittedSuccess] = useState(false);
   const [paymentSubmitting, setPaymentSubmitting] = useState(false);
   const [paymentError, setPaymentError] = useState<string | null>(null);
   const [fileUploadError, setFileUploadError] = useState<string | null>(null);
+
+  const handleProofFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const allowed = ['.pdf', '.jpg', '.jpeg', '.png'];
+    const ext = '.' + file.name.split('.').pop()?.toLowerCase();
+    if (!allowed.includes(ext)) {
+      setPaymentError(`Invalid receipt format (${ext}). Allowed formats: PDF, JPG, PNG.`);
+      e.target.value = '';
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setPaymentError(`File (${(file.size / (1024 * 1024)).toFixed(1)}MB) exceeds 5MB limit.`);
+      e.target.value = '';
+      return;
+    }
+    setPaymentError(null);
+    setPaymentProofFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = () => {
+      setPaymentProofDataUrl(reader.result as string);
+    };
+    reader.readAsDataURL(file);
+  };
 
   const ALLOWED_EXTENSIONS = ['.pdf', '.jpg', '.jpeg', '.png', '.doc', '.docx'];
   const MAX_FILE_SIZE = 15 * 1024 * 1024; // 15MB
@@ -148,6 +174,7 @@ export const BookConsultationPage: React.FC<BookConsultationPageProps> = ({ onNa
         amount: completedData.invoice.totalAmount,
         paymentMethod: 'Bank Transfer',
         bankTransactionRef: paymentTxnRef || `NIP-FT-${Date.now()}`,
+        proofDocumentUrl: paymentProofDataUrl || undefined,
         notes: 'Submitted via public consultation booking portal'
       });
       setPaymentSubmittedSuccess(true);
@@ -310,7 +337,7 @@ export const BookConsultationPage: React.FC<BookConsultationPageProps> = ({ onNa
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs text-slate-300 font-medium mb-1">
-                      Bank Transaction / Session ID / Reference:
+                      Bank Transaction / Session ID / Reference: *
                     </label>
                     <input
                       type="text"
@@ -321,15 +348,30 @@ export const BookConsultationPage: React.FC<BookConsultationPageProps> = ({ onNa
                       className="w-full text-xs p-2.5 rounded bg-slate-800 border border-slate-700 text-white placeholder-slate-500 focus:outline-hidden focus:border-amber-400"
                     />
                   </div>
-                  <div className="flex items-end">
-                    <button
-                      type="submit"
-                      disabled={paymentSubmitting}
-                      className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded transition-colors disabled:opacity-60"
-                    >
-                      {paymentSubmitting ? 'Submitting...' : 'Confirm Payment Submission'}
-                    </button>
+                  <div>
+                    <label className="block text-xs text-slate-300 font-medium mb-1">
+                      Upload Bank Transfer Receipt (Optional, PDF or Image):
+                    </label>
+                    <input
+                      type="file"
+                      accept=".pdf,.jpg,.jpeg,.png"
+                      onChange={handleProofFileChange}
+                      className="w-full text-xs p-1.5 rounded bg-slate-800 border border-slate-700 text-slate-300 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs file:bg-amber-600 file:text-white hover:file:bg-amber-700"
+                    />
+                    {paymentProofFileName && (
+                      <p className="text-[11px] text-emerald-400 mt-1">✓ Attached: {paymentProofFileName}</p>
+                    )}
                   </div>
+                </div>
+                <div className="flex justify-end pt-2">
+                  <button
+                    type="submit"
+                    disabled={paymentSubmitting}
+                    className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded transition-colors disabled:opacity-60 flex items-center space-x-1.5"
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>{paymentSubmitting ? 'Submitting...' : 'Confirm Payment Submission'}</span>
+                  </button>
                 </div>
                 <p className="text-[11px] text-slate-400">
                   Notice: Your payment will enter <strong>PAYMENT SUBMITTED</strong> status and be reviewed and audited by the Chambers Account Officer before the consultation is marked <strong>PAYMENT VERIFIED</strong>.
