@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Server-side authorization helpers for the BBBALE API.
  *
  * Enforces role-based access control (RBAC) before any protected database
@@ -20,32 +20,48 @@ const FIRM_ADMIN_ROLES: UserRole[] = ['PRINCIPAL_PARTNER'];
 const USER_MANAGER_ROLES: UserRole[] = ['PRINCIPAL_PARTNER', 'HEAD_OF_CHAMBER'];
 
 // Roles that can manage website content
-const WEBSITE_MANAGER_ROLES: UserRole[] = ['PRINCIPAL_PARTNER', 'HEAD_OF_CHAMBER', 'ADMINISTRATOR_SECRETARY'];
+const WEBSITE_MANAGER_ROLES: UserRole[] = [
+  'PRINCIPAL_PARTNER',
+  'HEAD_OF_CHAMBER',
+  'ADMINISTRATOR_SECRETARY'
+];
 
 // Roles that can assign cases
-const CASE_ASSIGNER_ROLES: UserRole[] = ['PRINCIPAL_PARTNER', 'HEAD_OF_CHAMBER'];
+const CASE_ASSIGNER_ROLES: UserRole[] = [
+  'PRINCIPAL_PARTNER',
+  'HEAD_OF_CHAMBER'
+];
 
-// Roles that can verify payments — SINGLE SHARED POLICY.
+// Roles that can verify or reject submitted payments.
 //
-// The payment-verification route previously allowed
-// ACCOUNT_OFFICER + ADMINISTRATOR_SECRETARY + PRINCIPAL_PARTNER while this
-// module declared only the first two. This constant is now the one policy used
-// by every server endpoint and by the client UI (via canVerifyPayments):
-//   - ACCOUNT_OFFICER         — performs the day-to-day verification/rejection.
-//   - ADMINISTRATOR_SECRETARY — chambers administration, per approved policy.
-//   - PRINCIPAL_PARTNER       — may verify directly and is the only role
-//                               permitted to apply an administrative correction
-//                               to an already-decided payment.
-// HEAD_OF_CHAMBER is a billing manager (creates invoices) but is NOT a payment
-// verifier under the firm's policy, so it is intentionally excluded here.
-export const PAYMENT_VERIFIER_ROLES: UserRole[] = ['ACCOUNT_OFFICER', 'ADMINISTRATOR_SECRETARY', 'PRINCIPAL_PARTNER'];
+// All payment-verification endpoints and client permission checks should use
+// this shared policy.
+//
+// ACCOUNT_OFFICER         — handles day-to-day payment verification.
+// HEAD_OF_CHAMBER         — can verify or reject submitted payments.
+// ADMINISTRATOR_SECRETARY — can verify or reject submitted payments.
+// PRINCIPAL_PARTNER       — can verify or reject payments and is the only
+//                           role permitted to apply administrative corrections.
+export const PAYMENT_VERIFIER_ROLES: UserRole[] = [
+  'ACCOUNT_OFFICER',
+  'HEAD_OF_CHAMBER',
+  'ADMINISTRATOR_SECRETARY',
+  'PRINCIPAL_PARTNER'
+];
 
 // Roles allowed to apply an administrative correction to an already-decided
-// payment (e.g. overturn a rejection). Deliberately narrower than verification.
-export const PAYMENT_CORRECTION_ROLES: UserRole[] = ['PRINCIPAL_PARTNER'];
+// payment, such as overturning a rejection.
+// Deliberately narrower than the normal payment-verification permissions.
+export const PAYMENT_CORRECTION_ROLES: UserRole[] = [
+  'PRINCIPAL_PARTNER'
+];
 
-// Roles that can manage billing/invoices
-const BILLING_ROLES: UserRole[] = ['PRINCIPAL_PARTNER', 'HEAD_OF_CHAMBER', 'ACCOUNT_OFFICER'];
+// Roles that can manage billing and invoices
+const BILLING_ROLES: UserRole[] = [
+  'PRINCIPAL_PARTNER',
+  'HEAD_OF_CHAMBER',
+  'ACCOUNT_OFFICER'
+];
 
 // All authenticated personnel roles
 const ALL_PERSONNEL_ROLES: UserRole[] = [
@@ -89,6 +105,9 @@ export function canManageBilling(user: User | null): boolean {
   return hasRole(user, BILLING_ROLES);
 }
 
+/**
+ * Check whether a user is an authorized member of personnel.
+ */
 export function isPersonnel(user: User | null): boolean {
   return hasRole(user, ALL_PERSONNEL_ROLES);
 }
@@ -113,21 +132,33 @@ export function filterByBranch<T extends Record<string, any>>(
   branchField: string = 'branch_id'
 ): T[] {
   const allowedBranch = getBranchFilter(user);
+
   if (allowedBranch === null) return records;
+
   return records.filter(r => {
     const recordBranch = r[branchField] || r.branchId;
-    if (!recordBranch) return true; // shared/reference data
+    if (!recordBranch) return true;
     return recordBranch === allowedBranch;
   });
 }
 
 /**
  * SQL WHERE clause fragment for branch filtering.
- * Returns '' for PRINCIPAL_PARTNER (no filter), or a parameterized clause for others.
+ * Returns '' for PRINCIPAL_PARTNER (no filter), or a parameterized clause
+ * for other roles.
  */
-export function branchFilterClause(user: User, column: string = 'branch_id'): { clause: string; params: any[] } {
-  if (user.role === 'PRINCIPAL_PARTNER') return { clause: '', params: [] };
-  return { clause: `WHERE ${column} = ?`, params: [user.branchId] };
+export function branchFilterClause(
+  user: User,
+  column: string = 'branch_id'
+): { clause: string; params: any[] } {
+  if (user.role === 'PRINCIPAL_PARTNER') {
+    return { clause: '', params: [] };
+  }
+
+  return {
+    clause: `WHERE ${column} = ?`,
+    params: [user.branchId]
+  };
 }
 
 // Maximum failed login attempts before temporary lockout
